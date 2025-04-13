@@ -14,7 +14,7 @@ const gameState = {
         sprite: null,
         canShoot: false,
         lastShotTime: 0,
-        shootCooldown: 500, // milliseconds between shots
+        shootCooldown: 350, // reduced from 500ms to 350ms for faster firing
         facingRight: true,
         // For hero3's charge attack
         isCharging: false,
@@ -168,6 +168,13 @@ function selectCharacter(characterType) {
     gameState.player.canShoot = characterSprites[characterType].canShoot;
     gameState.player.canCharge = characterSprites[characterType].canCharge;
     gameState.player.canSplat = characterSprites[characterType].canSplat;
+    
+    // Set hero1-specific attributes
+    if (characterType === 'hero1') {
+        gameState.player.shootCooldown = 350; // Faster fire rate for hero1
+    } else {
+        gameState.player.shootCooldown = 500; // Default for other heroes
+    }
 }
 
 // Game Functions
