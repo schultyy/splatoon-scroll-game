@@ -9,7 +9,7 @@ const gameState = {
         width: 70,
         height: 70,
         speed: 5,
-        jumpForce: 15,
+        jumpForce: 18, // Increased from 15 to 18 for higher jumps
         velocityY: 0,
         isJumping: false,
         sprite: null,
@@ -17,6 +17,12 @@ const gameState = {
         lastShotTime: 0,
         shootCooldown: 350, // reduced from 500ms to 350ms for faster firing
         facingRight: true,
+        // Aiming system
+        aimAngle: 0, // Current aim angle (0 = straight)
+        aimMax: Math.PI/3, // Maximum aiming angle (60 degrees)
+        aimStep: Math.PI/36, // Angle adjustment step (5 degrees)
+        showAimDot: false, // Whether to show the aiming dot
+        aimDistance: 150, // Distance to show the aim dot
         // Player health and lives
         maxHealth: 75,
         health: 75,
@@ -56,7 +62,9 @@ const gameState = {
         right: false,
         left: false,
         up: false,
-        space: false
+        space: false,
+        w: false, // W key for aiming up
+        s: false  // S key for aiming down
     },
     gameObjects: [],
     projectiles: [],
@@ -67,7 +75,13 @@ const gameState = {
     camera: {
         x: 0
     },
-    enemies: [] // We'll add some octo-style enemies
+    enemies: [], // We'll add some octo-style enemies
+    // Enemy respawn system
+    respawnTimer: null, // Timer for enemy respawn
+    lastEnemyDefeatTime: 0, // Time when last enemy was defeated
+    respawnDelay: 12000, // 12 seconds delay before respawn
+    shouldRespawn: false, // Flag to indicate if respawn should happen
+    waveNumber: 0 // Track the number of waves
 };
 
 // Character sprites
@@ -194,6 +208,12 @@ window.addEventListener('keydown', (e) => {
         case ' ': // Spacebar
             gameState.keys.space = true;
             break;
+        case 'w':
+            gameState.keys.w = true;
+            break;
+        case 's':
+            gameState.keys.s = true;
+            break;
     }
 });
 
@@ -210,6 +230,12 @@ window.addEventListener('keyup', (e) => {
             break;
         case ' ': // Spacebar
             gameState.keys.space = false;
+            break;
+        case 'w':
+            gameState.keys.w = false;
+            break;
+        case 's':
+            gameState.keys.s = false;
             break;
     }
 });
@@ -426,14 +452,14 @@ function createEnemy(type, index, count, occupiedPositions) {
     
     // Calculate spawn range based on index
     if (index < count / 2) {
-        // Left side and middle spawn
+        // Left side and middle spawn - always on the ground for safety
         possiblePositions.push({
             x: gameState.worldBoundaries.left + 100 + (index * 400) + Math.random() * 200,
             y: gameState.ground.y - enemyTypes[type].height,
             onPlatform: false
         });
     } else {
-        // Right side spawn
+        // Right side spawn - always on the ground for safety
         possiblePositions.push({
             x: 500 + ((index - count/2) * 500) + Math.random() * 300,
             y: gameState.ground.y - enemyTypes[type].height,
@@ -441,7 +467,7 @@ function createEnemy(type, index, count, occupiedPositions) {
         });
     }
     
-    // Add platform positions - consider ALL platforms including left side
+    // Add platform positions - consider ALL platforms
     gameState.platforms.forEach(platform => {
         // Only add as spawn point if platform is wide enough
         if (platform.width >= enemyTypes[type].width + 20) {
@@ -454,8 +480,29 @@ function createEnemy(type, index, count, occupiedPositions) {
         }
     });
     
+    // For octolings, prioritize ground and platform positions
+    let validPositions = possiblePositions;
+    if (type === 'octoling') {
+        // Make sure octolings are only spawned on valid surfaces
+        validPositions = possiblePositions.filter(pos => 
+            pos.y + enemyTypes[type].height === gameState.ground.y || // On ground
+            pos.onPlatform // On platform
+        );
+        
+        // If no valid positions, default back to ground-based positions
+        if (validPositions.length === 0) {
+            validPositions = [
+                {
+                    x: gameState.worldBoundaries.left + 100 + Math.random() * 500,
+                    y: gameState.ground.y - enemyTypes[type].height,
+                    onPlatform: false
+                }
+            ];
+        }
+    }
+    
     // Filter out positions that would overlap with existing enemies
-    const nonOverlappingPositions = possiblePositions.filter(pos => {
+    const nonOverlappingPositions = validPositions.filter(pos => {
         return !isPositionOverlapping(pos, occupiedPositions, enemyTypes[type].width, enemyTypes[type].height);
     });
     
@@ -509,7 +556,8 @@ function createEnemy(type, index, count, occupiedPositions) {
             currentPlatformId: spawnPosition.platformId, // Current platform
             targetPlatformId: null, // Target platform when jumping
             isPatrolling: true, // Patrolling or chasing player
-            stateChangeTime: Date.now() + 5000 + Math.random() * 3000 // Time to next AI state change
+            stateChangeTime: Date.now() + 5000 + Math.random() * 3000, // Time to next AI state change
+            canMoveFreely: true // Flag to indicate if the octoling can move freely
         });
     }
     
@@ -580,6 +628,26 @@ function update() {
     if (gameState.keys.up && !gameState.player.isJumping) {
         gameState.player.velocityY = -gameState.player.jumpForce;
         gameState.player.isJumping = true;
+    }
+    
+    // Handle aiming with W and S keys for h1 and h3 characters
+    if (gameState.selectedCharacter === 'hero1' || gameState.selectedCharacter === 'hero3') {
+        // Enable aim dot for h1 and h3
+        gameState.player.showAimDot = true;
+        
+        // Adjust aim angle with W (up) and S (down) keys
+        if (gameState.keys.w) {
+            // Aim up (negative angle for upward aiming)
+            gameState.player.aimAngle = Math.max(gameState.player.aimAngle - gameState.player.aimStep, -gameState.player.aimMax);
+        }
+        if (gameState.keys.s) {
+            // Aim down (positive angle for downward aiming)
+            gameState.player.aimAngle = Math.min(gameState.player.aimAngle + gameState.player.aimStep, gameState.player.aimMax);
+        }
+    } else {
+        // Disable aim dot for other characters
+        gameState.player.showAimDot = false;
+        gameState.player.aimAngle = 0; // Reset aim angle
     }
     
     // Shooting for hero1
@@ -713,9 +781,16 @@ function handleChargeAttack() {
             gameState.player.isCharging = true;
             gameState.player.chargeStartTime = currentTime;
         } else {
-            // Calculate charge level (0 to 1)
-            const elapsedChargeTime = currentTime - gameState.player.chargeStartTime;
-            gameState.player.chargeLevel = Math.min(elapsedChargeTime / gameState.player.maxChargeTime, 1);
+            // Check if player is jumping or falling
+            const isInAir = gameState.player.isJumping || gameState.player.velocityY > 0;
+            
+            // Apply charge rate modifier based on player's state
+            const chargeRateModifier = isInAir ? 0.5 : 1.0; // 1/2 as fast when in air
+            
+            // Calculate charge level (0 to 1) with modified rate
+            const rawElapsedTime = currentTime - gameState.player.chargeStartTime;
+            const effectiveElapsedTime = rawElapsedTime * chargeRateModifier;
+            gameState.player.chargeLevel = Math.min(effectiveElapsedTime / gameState.player.maxChargeTime, 1);
         }
     } else if (gameState.player.isCharging) {
         // Release charge
@@ -771,6 +846,7 @@ function shootChargedInk(damageMultiplier) {
 function shootInk() {
     const direction = gameState.player.facingRight ? 1 : -1;
     const offsetX = gameState.player.facingRight ? gameState.player.width : 0;
+    const centerY = gameState.player.y + gameState.player.height / 2;
     
     // For hero3 barrage mode, use charged shots instead
     if (gameState.player.isBarraging) {
@@ -778,13 +854,19 @@ function shootInk() {
         return;
     }
     
-    // Regular ink shot for hero1
+    // Apply aim angle to shot
+    const angle = gameState.player.aimAngle * (gameState.player.facingRight ? 1 : -1);
+    const speedX = 10 * direction * Math.cos(angle);
+    const speedY = 10 * Math.sin(angle);
+    
+    // Regular ink shot for hero1 with aiming
     gameState.projectiles.push({
         x: gameState.player.x + offsetX,
-        y: gameState.player.y + gameState.player.height / 2,
+        y: centerY,
         width: 15,
         height: 15,
-        speed: 10 * direction,
+        speedX: speedX,
+        speedY: speedY,
         color: '#4B0082', // Indigo ink color
         damage: 15, // Damage for hero1 projectiles
         canDamage: true
@@ -1265,6 +1347,27 @@ function updateEnemies() {
             updateOctolingAI(enemy, currentTime);
         }
     }
+    
+    // Check if all enemies are defeated
+    if (gameState.enemies.length === 0 && !gameState.shouldRespawn) {
+        // Record the time when all enemies were defeated
+        gameState.lastEnemyDefeatTime = currentTime;
+        gameState.shouldRespawn = true;
+    }
+    
+    // Check if it's time to respawn new enemies
+    if (gameState.shouldRespawn && 
+        currentTime - gameState.lastEnemyDefeatTime >= gameState.respawnDelay) {
+        
+        // Spawn new wave of enemies
+        spawnNewWave();
+        
+        // Reset respawn flag
+        gameState.shouldRespawn = false;
+        
+        // Increment wave counter
+        gameState.waveNumber++;
+    }
 }
 
 // Basic AI for OctoSlob
@@ -1299,6 +1402,7 @@ function updateOctolingAI(enemy, currentTime) {
         enemy.y = gameState.ground.y - enemy.height;
         enemy.velocityY = 0;
         enemy.isJumping = false;
+        enemy.onPlatform = false; // Not on a platform, on the ground
     }
     
     // Platform collision
@@ -1372,8 +1476,9 @@ function updateOctolingAI(enemy, currentTime) {
             }
         }
         
-        // Random jumping while patrolling
+        // Random jumping while patrolling - only if on ground or platform
         if (!enemy.isJumping && 
+            (enemy.onPlatform || enemy.y + enemy.height >= gameState.ground.y - 5) && // Ensure standing on something
             currentTime - enemy.lastJumpTime > enemyTypes.octoling.jumpCooldown && 
             Math.random() < 0.01) { // 1% chance each frame
             
@@ -1393,8 +1498,12 @@ function updateOctolingAI(enemy, currentTime) {
             enemy.facingRight = false;
         }
         
-        // Jump if player is higher and we can jump
+        // Only jump if we're on solid ground (platform or ground)
+        const isOnSolidGround = enemy.onPlatform || (enemy.y + enemy.height >= gameState.ground.y - 5);
+        
+        // Jump if player is higher and we can jump (only if on solid ground)
         if (!enemy.isJumping && 
+            isOnSolidGround && 
             player.y < enemy.y - 50 && 
             currentTime - enemy.lastJumpTime > enemyTypes.octoling.jumpCooldown) {
             
@@ -1403,14 +1512,33 @@ function updateOctolingAI(enemy, currentTime) {
             enemy.lastJumpTime = currentTime;
         }
         
-        // Jump to platform if player is on different platform
-        if (!enemy.isJumping && enemy.onPlatform && 
+        // Jump to platform if player is on different platform and we're on solid ground
+        if (!enemy.isJumping && 
+            enemy.onPlatform && 
             Math.abs(player.y - enemy.y) > 50 && 
             currentTime - enemy.lastJumpTime > enemyTypes.octoling.jumpCooldown / 2) { // Faster jumping when chasing platforms
             
             enemy.velocityY = -enemyTypes.octoling.jumpForce * 1.1;
             enemy.isJumping = true;
             enemy.lastJumpTime = currentTime;
+        }
+        
+        // If we're in the air and not jumping (falling), try to get back to ground
+        if (!enemy.onPlatform && 
+            enemy.y + enemy.height < gameState.ground.y - 5 && 
+            !enemy.isJumping) {
+            // Move toward the nearest grounded position (platform or ground)
+            const nearestPlatformX = findNearestPlatformOrGround(enemy);
+            if (nearestPlatformX !== null) {
+                // Move toward the nearest platform/ground position
+                if (nearestPlatformX > enemy.x) {
+                    enemy.x += enemyTypes.octoling.movementSpeed * 1.5;
+                    enemy.facingRight = true;
+                } else {
+                    enemy.x -= enemyTypes.octoling.movementSpeed * 1.5;
+                    enemy.facingRight = false;
+                }
+            }
         }
     }
     
@@ -1429,6 +1557,47 @@ function updateOctolingAI(enemy, currentTime) {
         enemy.x = gameState.worldBoundaries.right - enemy.width;
         enemy.movingRight = false;
     }
+}
+
+// Helper function to find the nearest platform or ground position
+function findNearestPlatformOrGround(enemy) {
+    // Calculate enemy center position
+    const enemyCenterX = enemy.x + enemy.width / 2;
+    
+    // Check if any platform is below and nearby
+    let closestDistance = Infinity;
+    let closestX = null;
+    
+    // Check platforms
+    for (const platform of gameState.platforms) {
+        // Only consider platforms below the enemy
+        if (platform.y > enemy.y + enemy.height) {
+            // Check if platform is within horizontal reach
+            if (platform.x < enemy.x + enemy.width && 
+                platform.x + platform.width > enemy.x) {
+                // This platform is directly below, return current x position
+                return enemyCenterX;
+            }
+            
+            // Check distance to the left edge of the platform
+            const distanceToLeft = Math.abs(platform.x - enemyCenterX);
+            if (distanceToLeft < closestDistance) {
+                closestDistance = distanceToLeft;
+                closestX = platform.x + enemy.width / 2;
+            }
+            
+            // Check distance to the right edge of the platform
+            const distanceToRight = Math.abs((platform.x + platform.width) - enemyCenterX);
+            if (distanceToRight < closestDistance) {
+                closestDistance = distanceToRight;
+                closestX = platform.x + platform.width - enemy.width / 2;
+            }
+        }
+    }
+    
+    // If we didn't find a nearby platform, return the current x position
+    // (will default to falling to the ground)
+    return closestX;
 }
 
 // Check enemy platform collisions
@@ -1473,39 +1642,30 @@ function checkEnemyPlatformCollisions(enemy) {
 
 // Octoling shooting function (similar to hero1 shooting)
 function octolingShoot(enemy) {
-    // Calculate direction to player (actual angle, not just left/right)
-    const playerCenterX = gameState.player.x + gameState.player.width / 2;
-    const playerCenterY = gameState.player.y + gameState.player.height / 2;
-    const enemyCenterX = enemy.x + enemy.width / 2;
-    const enemyCenterY = enemy.y + enemy.height / 2;
+    const direction = enemy.facingRight ? 1 : -1;
+    const offsetX = enemy.facingRight ? enemy.width : 0;
     
-    // Calculate angle between enemy and player
-    const dx = playerCenterX - enemyCenterX;
-    const dy = playerCenterY - enemyCenterY;
-    const angle = Math.atan2(dy, dx);
+    // Add aiming angle (similar to player's aiming)
+    // Random slight angle variation for more natural shooting
+    const angleVariation = (Math.random() - 0.5) * Math.PI / 12; // ±15 degrees variation
+    const angle = angleVariation * direction;
     
     // Calculate velocity components based on angle
-    const speed = enemyTypes.octoling.projectileSpeed;
-    const velocityX = Math.cos(angle) * speed;
-    const velocityY = Math.sin(angle) * speed;
+    const speedX = enemyTypes.octoling.projectileSpeed * direction * Math.cos(angle);
+    const speedY = enemyTypes.octoling.projectileSpeed * Math.sin(angle);
     
-    // Update enemy facing direction based on player position
-    enemy.facingRight = dx > 0;
-    
-    // Create enemy ink projectile with directional velocity
+    // Create projectile with speedX and speedY instead of just speed
     gameState.projectiles.push({
-        x: enemyCenterX,
-        y: enemyCenterY,
+        x: enemy.x + offsetX,
+        y: enemy.y + enemy.height / 2,
         width: enemyTypes.octoling.projectileSize,
         height: enemyTypes.octoling.projectileSize,
-        speedX: velocityX,
-        speedY: velocityY,
-        angle: angle, // Store the angle for reference
-        color: '#9932CC', // Purple ink color for octolings
-        damage: enemyTypes.octoling.projectileDamage, // Use the value from enemyTypes
+        speedX: speedX,
+        speedY: speedY,
+        color: '#9932CC', // Purple ink color
+        damage: enemyTypes.octoling.projectileDamage,
         canDamage: true,
-        isEnemyProjectile: true, // Flag to identify enemy projectiles
-        gravity: 0.05 // Add slight gravity for more natural arc
+        isEnemyProjectile: true
     });
 }
 
@@ -1871,15 +2031,25 @@ function updateArmorPickups() {
             pickup.y < player.y + player.height &&
             pickup.y + pickup.height > player.y) {
             
-            // Add armor to player
-            player.temporaryArmor += pickup.armorAmount;
-            
-            // Create armor number
-            createArmorNumber(
-                player.x + player.width / 2,
-                player.y - 20,
-                pickup.armorAmount
-            );
+            // Check if player is at maximum health
+            if (player.health >= player.maxHealth) {
+                // Add armor to player only when at max health
+                player.temporaryArmor += pickup.armorAmount;
+                
+                // Create armor number
+                createArmorNumber(
+                    player.x + player.width / 2,
+                    player.y - 20,
+                    pickup.armorAmount
+                );
+            } else {
+                // If not at max health, show an info message
+                createArmorNumber(
+                    player.x + player.width / 2,
+                    player.y - 20,
+                    0
+                );
+            }
             
             // Remove the pickup
             gameState.armorPickups.splice(i, 1);
@@ -1889,21 +2059,40 @@ function updateArmorPickups() {
 
 // Create a floating armor number (white for armor)
 function createArmorNumber(x, y, amount) {
-    gameState.damageNumbers.push({
-        x: x,
-        y: y - 20,
-        value: amount,
-        color: '#FFFFFF', // White for armor
-        age: 0,
-        lifespan: 40,
-        velocityY: -1.5,
-        velocityX: (Math.random() - 0.5) * 1.5,
-        isArmor: true // Flag as armor number
-    });
+    // Use a special message for when armor can't be added
+    if (amount === 0) {
+        gameState.damageNumbers.push({
+            x: x,
+            y: y - 20,
+            value: "MAX HP REQUIRED",
+            color: '#FF9900', // Orange for warning
+            age: 0,
+            lifespan: 60, // Longer lifespan for the message
+            velocityY: -1,
+            velocityX: 0,
+            isArmor: true,
+            isMessage: true // Flag as a text message
+        });
+    } else {
+        gameState.damageNumbers.push({
+            x: x,
+            y: y - 20,
+            value: amount,
+            color: '#FFFFFF', // White for armor
+            age: 0,
+            lifespan: 40,
+            velocityY: -1.5,
+            velocityX: (Math.random() - 0.5) * 1.5,
+            isArmor: true // Flag as armor number
+        });
+    }
 }
 
 // Draw armor pickups
 function drawArmorPickups() {
+    const player = gameState.player;
+    const isAtMaxHealth = player.health >= player.maxHealth;
+    
     gameState.armorPickups.forEach(pickup => {
         const drawX = pickup.x - gameState.camera.x;
         
@@ -1927,8 +2116,8 @@ function drawArmorPickups() {
         ctx.scale(scale, scale);
         
         // Draw the armor plate (shield shape)
-        // Shield background
-        ctx.fillStyle = '#DDDDDD'; // Light gray
+        // Shield background - gray out if player not at max health
+        ctx.fillStyle = isAtMaxHealth ? '#DDDDDD' : '#999999'; // Light gray or darker if unavailable
         ctx.beginPath();
         ctx.moveTo(0, -pickup.height/2); // Top center
         ctx.bezierCurveTo(
@@ -1949,7 +2138,7 @@ function drawArmorPickups() {
         ctx.stroke();
         
         // Draw cross/plus in center
-        ctx.fillStyle = '#FFFFFF'; // White
+        ctx.fillStyle = isAtMaxHealth ? '#FFFFFF' : '#AAAAAA'; // White or gray if unavailable
         
         // Horizontal bar of plus
         ctx.fillRect(
@@ -1970,10 +2159,14 @@ function drawArmorPickups() {
         // Restore context
         ctx.restore();
         
-        // Add a glowing effect
+        // Add a glowing effect - brighter if available, dimmer if not
         ctx.save();
-        ctx.globalAlpha = 0.4 + Math.sin(Date.now() / 100) * 0.2;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        const glowAlpha = isAtMaxHealth ? 
+            0.4 + Math.sin(Date.now() / 100) * 0.2 : // Normal glow if available
+            0.2 + Math.sin(Date.now() / 100) * 0.1;  // Dimmer if unavailable
+        
+        ctx.globalAlpha = glowAlpha;
+        ctx.fillStyle = isAtMaxHealth ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.3)';
         ctx.beginPath();
         ctx.arc(
             drawX + pickup.width / 2,
@@ -1984,6 +2177,16 @@ function drawArmorPickups() {
         );
         ctx.fill();
         ctx.restore();
+        
+        // Add "MAX HP" indicator if player is not at max health
+        if (!isAtMaxHealth) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(255, 100, 0, ' + (0.7 + Math.sin(Date.now() / 150) * 0.3) + ')';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('MAX HP', drawX + pickup.width / 2, pickup.y - 5);
+            ctx.restore();
+        }
     });
 }
 
@@ -2274,6 +2477,9 @@ function drawChargeMeter() {
     const currentTime = Date.now();
     const isInCooldown = currentTime - gameState.player.lastBarrageEndTime < gameState.player.globalCooldown;
     
+    // Check if player is in air (jumping or falling)
+    const isInAir = gameState.player.isJumping || gameState.player.velocityY > 0;
+    
     // Draw charge level
     let fillColor = 'yellow';
     if (isInCooldown) {
@@ -2290,6 +2496,9 @@ function drawChargeMeter() {
     } else if (gameState.player.isBarraging) {
         // Blink during barrage
         fillColor = Math.floor(Date.now() / 100) % 2 === 0 ? 'orange' : 'red';
+    } else if (isInAir && gameState.player.isCharging) {
+        // In air charging - different color or pattern
+        fillColor = 'orange'; // Orange for reduced charge rate
     }
     
     ctx.fillStyle = fillColor;
@@ -2306,6 +2515,16 @@ function drawChargeMeter() {
     // Draw marker at 1/2 charge
     ctx.fillStyle = 'white';
     ctx.fillRect(meterX + (meterWidth * 0.5) - 1, meterY - 2, 2, meterHeight + 4);
+    
+    // Show reduced charge rate indicator when in air
+    if (isInAir && gameState.player.isCharging) {
+        // Draw pulsing half-speed indicator
+        const pulseOpacity = 0.5 + Math.sin(Date.now() / 200) * 0.3;
+        ctx.fillStyle = `rgba(255, 255, 255, ${pulseOpacity})`;
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('1/2', meterX + meterWidth/2, meterY - 5);
+    }
 }
 
 // Draw platforms
@@ -2474,12 +2693,21 @@ function drawDamageNumbers() {
         
         // Draw the number with a prefix for healing
         ctx.fillStyle = number.color + Math.floor(opacity * 255).toString(16).padStart(2, '0');
-        ctx.font = 'bold 16px Arial';
-        ctx.textAlign = 'center';
         
-        // Add + prefix for healing numbers
-        const displayText = number.isHealing ? '+' + Math.round(number.value) : Math.round(number.value);
-        ctx.fillText(displayText, 0, 0);
+        if (number.isMessage) {
+            // Use smaller font for text messages
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(number.value, 0, 0);
+        } else {
+            // Regular number display
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            
+            // Add + prefix for healing numbers
+            const displayText = number.isHealing ? '+' + Math.round(number.value) : Math.round(number.value);
+            ctx.fillText(displayText, 0, 0);
+        }
         
         ctx.restore();
     });
@@ -2639,6 +2867,12 @@ function restartGame() {
     gameState.projectiles = [];
     gameState.damageNumbers = [];
     gameState.healthPickups = [];
+    gameState.armorPickups = [];
+    
+    // Reset respawn system
+    gameState.shouldRespawn = false;
+    gameState.lastEnemyDefeatTime = 0;
+    gameState.waveNumber = 0;
     
     // Generate new enemies
     generateEnemies();
@@ -2901,6 +3135,34 @@ function drawPlayer() {
         );
     }
     
+    // Draw aiming dot if enabled
+    if (gameState.player.showAimDot) {
+        const centerX = gameState.player.x + (gameState.player.facingRight ? gameState.player.width : 0);
+        const centerY = gameState.player.y + gameState.player.height / 2;
+        const angle = gameState.player.aimAngle * (gameState.player.facingRight ? 1 : -1);
+        const distance = gameState.player.aimDistance || 50;
+        
+        // Calculate dot position
+        const dotX = centerX + Math.cos(angle) * distance * (gameState.player.facingRight ? 1 : -1);
+        const dotY = centerY + Math.sin(angle) * distance;
+        
+        // Draw the aim dot
+        ctx.save();
+        ctx.fillStyle = '#FF0000';
+        ctx.beginPath();
+        ctx.arc(dotX - gameState.camera.x, dotY, 5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw a line from player to dot
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(centerX - gameState.camera.x, centerY);
+        ctx.lineTo(dotX - gameState.camera.x, dotY);
+        ctx.stroke();
+        ctx.restore();
+    }
+    
     // Draw contact damage effect if active for hero2
     if (gameState.player.hasContactDamage && gameState.player.contactDamageActive) {
         drawContactDamageEffect();
@@ -2926,4 +3188,46 @@ function drawPlayer() {
         ctx.stroke();
         ctx.restore();
     }
+}
+
+// Function to spawn new wave of enemies
+function spawnNewWave() {
+    // Clear any existing enemies (just in case)
+    gameState.enemies = [];
+    
+    // Create 5 octoslobs and 2 octolings as requested
+    const octoSlobCount = 5;
+    const octolingCount = 2;
+    
+    // Keep track of occupied positions to prevent overlap
+    const occupiedPositions = [];
+    
+    // Create OctoSlobs
+    for (let i = 0; i < octoSlobCount; i++) {
+        createEnemy('octoSlob', i, octoSlobCount, occupiedPositions);
+    }
+    
+    // Create Octolings
+    for (let i = 0; i < octolingCount; i++) {
+        createEnemy('octoling', i, octolingCount, occupiedPositions);
+    }
+    
+    // Create a visual notification that a new wave has spawned
+    createWaveNotification(gameState.waveNumber + 1);
+}
+
+// Create a notification about the new wave
+function createWaveNotification(waveNumber) {
+    // Create a centered notification
+    gameState.damageNumbers.push({
+        x: gameState.player.x,  // Center horizontally near player
+        y: 100,  // Fixed position at top of screen
+        value: `WAVE ${waveNumber}`,
+        color: '#FF9900', // Orange color
+        age: 0,
+        lifespan: 120, // Longer lifespan (2 seconds at 60fps)
+        velocityY: 0,
+        velocityX: 0,
+        isMessage: true
+    });
 } 
