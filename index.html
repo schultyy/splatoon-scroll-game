@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Side Scrolling Game</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Start Screen -->
+        <div id="start-screen" class="screen active">
+            <h1>Side Scrolling Adventure</h1>
+            <button id="start-button">Start Game</button>
+        </div>
+        
+        <!-- Character Selection Screen -->
+        <div id="character-select-screen" class="screen">
+            <h2>Choose Your Character</h2>
+            <div class="character-options">
+                <div class="character" data-character="hero1">
+                    <div class="character-img">
+                        <img src="assets/game-modes-char.png" alt="Hero 1">
+                    </div>
+                    <p>Hero 1</p>
+                </div>
+                <div class="character" data-character="hero2">
+                    <div class="character-img">
+                        <img src="assets/splatoon-inline2.jpg" alt="Hero 2">
+                    </div>
+                    <p>Hero 2</p>
+                </div>
+                <div class="character" data-character="hero3">
+                    <div class="character-img">
+                        <img src="assets/Splatoon_2_-_Inkling_with_Splatlings.png" alt="Hero 3">
+                    </div>
+                    <p>Hero 3</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Game Screen -->
+        <div id="game-screen" class="screen">
+            <canvas id="game-canvas"></canvas>
+        </div>
+    </div>
+    
+    <script src="game.js"></script>
+</body>
+</html> 
