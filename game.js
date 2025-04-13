@@ -39,7 +39,7 @@ const gameState = {
         y: 550, // Bottom of the canvas - player height
     },
     worldBoundaries: {
-        left: 0, // Left boundary
+        left: -500, // Extended left boundary to allow more movement to the left
         right: 3000 // Right boundary
     },
     keys: {
@@ -228,6 +228,51 @@ function selectCharacter(characterType) {
     generatePlatforms();
 }
 
+// Generate platforms for the game
+function generatePlatforms() {
+    gameState.platforms = [
+        // Left side platforms
+        {x: -450, y: 400, width: 120, height: 20, color: '#8B4513'},
+        {x: -300, y: 320, width: 150, height: 20, color: '#8B4513'},
+        {x: -100, y: 450, width: 180, height: 20, color: '#8B4513'},
+        
+        // Middle/starting area platforms
+        {x: 200, y: 450, width: 150, height: 20, color: '#8B4513'},
+        {x: 450, y: 380, width: 120, height: 20, color: '#8B4513'},
+        {x: 700, y: 320, width: 180, height: 20, color: '#8B4513'},
+        
+        // Right side platforms
+        {x: 1000, y: 400, width: 150, height: 20, color: '#8B4513'},
+        {x: 1250, y: 300, width: 120, height: 20, color: '#8B4513'},
+        {x: 1500, y: 380, width: 200, height: 20, color: '#8B4513'},
+        {x: 1800, y: 320, width: 150, height: 20, color: '#8B4513'},
+        {x: 2100, y: 400, width: 180, height: 20, color: '#8B4513'},
+        {x: 2400, y: 350, width: 150, height: 20, color: '#8B4513'},
+        {x: 2700, y: 300, width: 200, height: 20, color: '#8B4513'}
+    ];
+    
+    // Update boundaries based on furthest platforms
+    let leftmostPoint = 0;
+    let rightmostPoint = 0;
+    
+    gameState.platforms.forEach(platform => {
+        // Check for leftmost point
+        if (platform.x < leftmostPoint) {
+            leftmostPoint = platform.x;
+        }
+        
+        // Check for rightmost point
+        const platformEnd = platform.x + platform.width;
+        if (platformEnd > rightmostPoint) {
+            rightmostPoint = platformEnd;
+        }
+    });
+    
+    // Set boundaries based on platforms with some extra space
+    gameState.worldBoundaries.left = leftmostPoint - 100;
+    gameState.worldBoundaries.right = rightmostPoint + 200;
+}
+
 // Generate some enemies to demonstrate contact damage
 function generateEnemies() {
     gameState.enemies = [];
@@ -237,8 +282,8 @@ function generateEnemies() {
         generatePlatforms();
     }
     
-    // Reduced number of octoslob enemies (5 instead of 10)
-    const enemyCount = 5;
+    // Increased number of enemies to populate both left and right sides
+    const enemyCount = 8;
     
     // Keep track of occupied positions to prevent overlap
     const occupiedPositions = [];
@@ -247,14 +292,25 @@ function generateEnemies() {
         // Create a pool of possible spawn positions
         const possiblePositions = [];
         
-        // Add ground positions (spaced out)
-        possiblePositions.push({
-            x: 400 + i * 600 + Math.random() * 200, // More random spacing
-            y: gameState.ground.y - enemyTypes.octoSlob.height, // On the ground
-            onPlatform: false
-        });
+        // Add ground positions across the entire world (both left and right)
+        // Distribute evenly with some randomness
+        if (i < enemyCount / 2) {
+            // Left side and middle spawn
+            possiblePositions.push({
+                x: gameState.worldBoundaries.left + 100 + (i * 300) + Math.random() * 100,
+                y: gameState.ground.y - enemyTypes.octoSlob.height,
+                onPlatform: false
+            });
+        } else {
+            // Right side spawn
+            possiblePositions.push({
+                x: 400 + ((i - enemyCount/2) * 500) + Math.random() * 200,
+                y: gameState.ground.y - enemyTypes.octoSlob.height,
+                onPlatform: false
+            });
+        }
         
-        // Add platform positions
+        // Add platform positions - consider ALL platforms including left side
         gameState.platforms.forEach(platform => {
             // Only add as spawn point if platform is wide enough
             if (platform.width >= enemyTypes.octoSlob.width + 20) {
@@ -328,35 +384,6 @@ function isPositionOverlapping(position, occupiedPositions) {
     return false; // No overlap
 }
 
-// Generate platforms for the game
-function generatePlatforms() {
-    gameState.platforms = [
-        // Format: {x, y, width, height, color}
-        {x: 200, y: 450, width: 150, height: 20, color: '#8B4513'},
-        {x: 450, y: 380, width: 120, height: 20, color: '#8B4513'},
-        {x: 700, y: 320, width: 180, height: 20, color: '#8B4513'},
-        {x: 1000, y: 400, width: 150, height: 20, color: '#8B4513'},
-        {x: 1250, y: 300, width: 120, height: 20, color: '#8B4513'},
-        {x: 1500, y: 380, width: 200, height: 20, color: '#8B4513'},
-        {x: 1800, y: 320, width: 150, height: 20, color: '#8B4513'},
-        {x: 2100, y: 400, width: 180, height: 20, color: '#8B4513'},
-        {x: 2400, y: 350, width: 150, height: 20, color: '#8B4513'},
-        {x: 2700, y: 300, width: 200, height: 20, color: '#8B4513'}
-    ];
-    
-    // Update right boundary based on furthest platform
-    let furthestPoint = 0;
-    gameState.platforms.forEach(platform => {
-        const platformEnd = platform.x + platform.width;
-        if (platformEnd > furthestPoint) {
-            furthestPoint = platformEnd;
-        }
-    });
-    
-    // Set the right boundary to be a bit beyond the last platform
-    gameState.worldBoundaries.right = furthestPoint + 200;
-}
-
 // Game Functions
 function gameLoop() {
     // Clear canvas
@@ -384,7 +411,7 @@ function update() {
         gameState.player.facingRight = true;
     }
     if (gameState.keys.left) {
-        // Apply boundary check for the left edge
+        // Use the left world boundary for consistent movement restriction
         if (gameState.player.x - gameState.player.speed >= gameState.worldBoundaries.left) {
             gameState.player.x -= gameState.player.speed;
         } else {
@@ -441,9 +468,21 @@ function update() {
         gameState.player.isJumping = false;
     }
     
-    // Camera follow player (simple side-scrolling)
-    if (gameState.player.x > 400) {
-        gameState.camera.x = gameState.player.x - 400;
+    // Camera follow player with smooth tracking in both directions
+    const cameraTargetX = gameState.player.x - 400; // Center player horizontally
+    
+    // Smoother camera movement with lerping
+    const cameraSpeed = 0.1; // Adjust this value for smoother/faster camera movement
+    gameState.camera.x += (cameraTargetX - gameState.camera.x) * cameraSpeed;
+    
+    // Ensure camera stays within boundaries, but allow proper left movement
+    const minCameraX = gameState.worldBoundaries.left;
+    const maxCameraX = gameState.worldBoundaries.right - canvas.width;
+    
+    if (gameState.camera.x < minCameraX) {
+        gameState.camera.x = minCameraX;
+    } else if (gameState.camera.x > maxCameraX) {
+        gameState.camera.x = maxCameraX;
     }
     
     // Update projectiles
@@ -897,9 +936,14 @@ function draw() {
     ctx.fillStyle = '#87CEEB';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Draw ground
+    // Draw ground - extend from left boundary to right boundary
     ctx.fillStyle = '#8B4513';
-    ctx.fillRect(0 - gameState.camera.x, gameState.ground.y, canvas.width + 1000, canvas.height - gameState.ground.y);
+    ctx.fillRect(
+        gameState.worldBoundaries.left - gameState.camera.x, 
+        gameState.ground.y, 
+        gameState.worldBoundaries.right - gameState.worldBoundaries.left + 1000, 
+        canvas.height - gameState.ground.y
+    );
     
     // Draw some background elements (clouds, mountains, etc.)
     drawBackgroundElements();
