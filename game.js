@@ -1473,20 +1473,39 @@ function checkEnemyPlatformCollisions(enemy) {
 
 // Octoling shooting function (similar to hero1 shooting)
 function octolingShoot(enemy) {
-    const direction = enemy.facingRight ? 1 : -1;
-    const offsetX = enemy.facingRight ? enemy.width : 0;
+    // Calculate direction to player (actual angle, not just left/right)
+    const playerCenterX = gameState.player.x + gameState.player.width / 2;
+    const playerCenterY = gameState.player.y + gameState.player.height / 2;
+    const enemyCenterX = enemy.x + enemy.width / 2;
+    const enemyCenterY = enemy.y + enemy.height / 2;
     
-    // Create projectile
+    // Calculate angle between enemy and player
+    const dx = playerCenterX - enemyCenterX;
+    const dy = playerCenterY - enemyCenterY;
+    const angle = Math.atan2(dy, dx);
+    
+    // Calculate velocity components based on angle
+    const speed = enemyTypes.octoling.projectileSpeed;
+    const velocityX = Math.cos(angle) * speed;
+    const velocityY = Math.sin(angle) * speed;
+    
+    // Update enemy facing direction based on player position
+    enemy.facingRight = dx > 0;
+    
+    // Create enemy ink projectile with directional velocity
     gameState.projectiles.push({
-        x: enemy.x + offsetX,
-        y: enemy.y + enemy.height / 2,
+        x: enemyCenterX,
+        y: enemyCenterY,
         width: enemyTypes.octoling.projectileSize,
         height: enemyTypes.octoling.projectileSize,
-        speed: enemyTypes.octoling.projectileSpeed * direction,
-        color: '#9932CC', // Purple ink color
-        damage: enemyTypes.octoling.projectileDamage,
+        speedX: velocityX,
+        speedY: velocityY,
+        angle: angle, // Store the angle for reference
+        color: '#9932CC', // Purple ink color for octolings
+        damage: enemyTypes.octoling.projectileDamage, // Use the value from enemyTypes
         canDamage: true,
-        isEnemyProjectile: true
+        isEnemyProjectile: true, // Flag to identify enemy projectiles
+        gravity: 0.05 // Add slight gravity for more natural arc
     });
 }
 
