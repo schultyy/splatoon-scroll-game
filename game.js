@@ -55,8 +55,8 @@ const gameState = {
         y: 550, // Bottom of the canvas - player height
     },
     worldBoundaries: {
-        left: -500, // Extended left boundary to allow more movement to the left
-        right: 3000 // Right boundary
+        left: -500, // Default left boundary
+        right: 3000 // Default right boundary
     },
     keys: {
         right: false,
@@ -498,6 +498,16 @@ function startGame() {
         setupTouchControls();
     }
     
+    // Make sure we have initialized platforms and boundaries before starting the game loop
+    if (gameState.platforms.length === 0) {
+        generatePlatforms();
+    }
+    
+    // Ensure we have enemies
+    if (gameState.enemies.length === 0) {
+        generateEnemies();
+    }
+    
     // Start the game loop
     gameLoopRunning = true;
     gameLoop();
@@ -560,26 +570,39 @@ function generatePlatforms() {
         {x: 2700, y: 300, width: 200, height: 20, color: '#8B4513'}
     ];
     
-    // Update boundaries based on furthest platforms
-    let leftmostPoint = 0;
-    let rightmostPoint = 0;
+    // Initialize boundaries with default values
+    // These will be used if there are no platforms
+    let leftmostPoint = -500;
+    let rightmostPoint = 3000;
     
-    gameState.platforms.forEach(platform => {
-        // Check for leftmost point
-        if (platform.x < leftmostPoint) {
-            leftmostPoint = platform.x;
-        }
+    // Update boundaries based on furthest platforms if we have any
+    if (gameState.platforms.length > 0) {
+        leftmostPoint = 0;
+        rightmostPoint = 0;
         
-        // Check for rightmost point
-        const platformEnd = platform.x + platform.width;
-        if (platformEnd > rightmostPoint) {
-            rightmostPoint = platformEnd;
-        }
-    });
+        gameState.platforms.forEach(platform => {
+            // Check for leftmost point
+            if (platform.x < leftmostPoint) {
+                leftmostPoint = platform.x;
+            }
+            
+            // Check for rightmost point
+            const platformEnd = platform.x + platform.width;
+            if (platformEnd > rightmostPoint) {
+                rightmostPoint = platformEnd;
+            }
+        });
+        
+        // Set boundaries based on platforms with some extra space
+        leftmostPoint = leftmostPoint - 100;
+        rightmostPoint = rightmostPoint + 200;
+    }
     
-    // Set boundaries based on platforms with some extra space
-    gameState.worldBoundaries.left = leftmostPoint - 100;
-    gameState.worldBoundaries.right = rightmostPoint + 200;
+    // Ensure worldBoundaries is defined and set
+    gameState.worldBoundaries = {
+        left: leftmostPoint,
+        right: rightmostPoint
+    };
 }
 
 // Generate some enemies to demonstrate contact damage
@@ -768,6 +791,14 @@ function gameLoop() {
 }
 
 function update() {
+    // Ensure worldBoundaries are defined
+    if (!gameState.worldBoundaries) {
+        gameState.worldBoundaries = {
+            left: -500,
+            right: 3000
+        };
+    }
+    
     // Player movement and direction facing
     if (gameState.keys.right) {
         // Apply boundary check for the right edge
