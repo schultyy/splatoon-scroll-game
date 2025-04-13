@@ -56,10 +56,41 @@
     <script>
         // Register service worker
         if ('serviceWorker' in navigator) {
+            let refreshing = false;
+            
+            // When the service worker has updated and is waiting to activate,
+            // we can notify the user and/or automatically reload the page
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (refreshing) return;
+                refreshing = true;
+                window.location.reload();
+            });
+            
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('service-worker.js')
                     .then(registration => {
                         console.log('Service Worker registered with scope:', registration.scope);
+                        
+                        // Check for updates on each page load
+                        registration.update();
+                        
+                        // When the service worker has updated and is waiting to activate
+                        if (registration.waiting) {
+                            // You could optionally show a notification to the user here
+                            console.log('New version available!');
+                        }
+                        
+                        // Listen for new service workers installing
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    console.log('New content is available; please refresh.');
+                                    // You could show a notification to the user here
+                                }
+                            });
+                        });
                     })
                     .catch(error => {
                         console.error('Service Worker registration failed:', error);

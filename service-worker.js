@@ -1,4 +1,6 @@
-const CACHE_NAME = 'side-scrolling-game-v1';
+const CACHE_NAME = 'side-scrolling-game-v2';
+// Use a separate cache for updated resources
+const TEMP_CACHE_NAME = 'side-scrolling-game-new-v2';
 const ASSETS_TO_CACHE = [
   './',
   'index.html',
@@ -25,51 +27,73 @@ self.addEventListener('install', event => {
   );
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches and promote temp cache if exists
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.filter(cacheName => {
-          return cacheName !== CACHE_NAME;
+      return Promise.all([
+        // Clean up old version caches
+        ...cacheNames.filter(cacheName => {
+          return cacheName !== CACHE_NAME && 
+                 cacheName !== TEMP_CACHE_NAME;
         }).map(cacheName => {
           return caches.delete(cacheName);
+        }),
+        
+        // If we have a temp cache with updates, promote it to the main cache
+        caches.has(TEMP_CACHE_NAME).then(hasTempCache => {
+          if (hasTempCache) {
+            return caches.open(TEMP_CACHE_NAME).then(tempCache => {
+              return tempCache.keys().then(tempKeys => {
+                return caches.open(CACHE_NAME).then(mainCache => {
+                  return Promise.all(
+                    tempKeys.map(key => {
+                      return tempCache.match(key).then(response => {
+                        return mainCache.put(key, response);
+                      });
+                    })
+                  ).then(() => {
+                    return caches.delete(TEMP_CACHE_NAME);
+                  });
+                });
+              });
+            });
+          }
+          return Promise.resolve();
         })
-      );
+      ]);
     }).then(() => self.clients.claim())
   );
 });
 
-// Fetch event - serve from cache, fall back to network
+// Fetch event - stale-while-revalidate pattern
 self.addEventListener('fetch', event => {
+  // Skip non-GET requests
+  if (event.request.method !== 'GET') return;
+  
+  // Handle the fetch event with our cache-first, update-in-background strategy
   event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        // Return cached response if found
-        if (response) {
-          return response;
-        }
-        
-        // Clone the request
-        const fetchRequest = event.request.clone();
-        
-        // Try to fetch from network and cache the response
-        return fetch(fetchRequest).then(response => {
-          // Check if valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-          
-          // Clone response to store in cache
-          const responseToCache = response.clone();
-          
-          caches.open(CACHE_NAME)
-            .then(cache => {
+    caches.match(event.request).then(cachedResponse => {
+      const fetchPromise = fetch(event.request)
+        .then(networkResponse => {
+          // If we got a valid response, cache it in the temp cache for next launch
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            // Store in temp cache that will be promoted on next activation
+            const responseToCache = networkResponse.clone();
+            caches.open(TEMP_CACHE_NAME).then(cache => {
               cache.put(event.request, responseToCache);
             });
-            
-          return response;
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          // Network request failed, just continue with cached response
+          console.log('Network request failed, using cache only');
         });
-      })
+
+      // Return the cached response immediately if we have it,
+      // otherwise wait for the network response
+      return cachedResponse || fetchPromise;
+    })
   );
 }); 
