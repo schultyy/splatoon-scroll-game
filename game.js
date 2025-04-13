@@ -66,6 +66,10 @@ const gameState = {
         w: false, // W key for aiming up
         s: false  // S key for aiming down
     },
+    inputMethod: {
+        hasKeyboard: true, // Will be set based on detection
+        touchControls: false // Whether to show touch controls
+    },
     gameObjects: [],
     projectiles: [],
     damageNumbers: [], // Array to hold damage number indicators
@@ -83,6 +87,153 @@ const gameState = {
     shouldRespawn: false, // Flag to indicate if respawn should happen
     waveNumber: 0 // Track the number of waves
 };
+
+// Detect if device has keyboard support
+function detectKeyboard() {
+    // A simple heuristic: most touch-only devices are identified as mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    gameState.inputMethod.hasKeyboard = !isMobile;
+    gameState.inputMethod.touchControls = isMobile;
+    
+    // If no keyboard detected, set up touch controls
+    if (!gameState.inputMethod.hasKeyboard) {
+        setupTouchControls();
+    }
+}
+
+// Set up touch controls for mobile devices
+function setupTouchControls() {
+    // Add touch controls to game screen
+    const gameContainer = document.getElementById('game-container');
+    
+    const touchControlsContainer = document.createElement('div');
+    touchControlsContainer.id = 'touch-controls';
+    touchControlsContainer.innerHTML = `
+        <div id="movement-controls">
+            <button id="left-btn">←</button>
+            <button id="right-btn">→</button>
+        </div>
+        <div id="action-controls">
+            <button id="jump-btn">J</button>
+            <button id="action-btn">A</button>
+        </div>
+    `;
+    gameContainer.appendChild(touchControlsContainer);
+    
+    // Button press event handlers
+    const leftBtn = document.getElementById('left-btn');
+    const rightBtn = document.getElementById('right-btn');
+    const jumpBtn = document.getElementById('jump-btn');
+    const actionBtn = document.getElementById('action-btn');
+    
+    // Movement buttons (left/right)
+    leftBtn.addEventListener('touchstart', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.left = true; 
+    });
+    leftBtn.addEventListener('touchend', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.left = false; 
+    });
+    
+    rightBtn.addEventListener('touchstart', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.right = true; 
+    });
+    rightBtn.addEventListener('touchend', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.right = false; 
+    });
+    
+    // Jump button (up arrow equivalent)
+    jumpBtn.addEventListener('touchstart', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.up = true; 
+    });
+    jumpBtn.addEventListener('touchend', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.up = false; 
+    });
+    
+    // Action button (spacebar equivalent)
+    actionBtn.addEventListener('touchstart', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.space = true; 
+    });
+    actionBtn.addEventListener('touchend', (e) => { 
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.space = false; 
+    });
+    
+    // Also add swipe up/down for aiming (W/S key equivalents)
+    let touchStartY = 0;
+    
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent text selection
+        touchStartY = e.touches[0].clientY;
+    });
+    
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault(); // Prevent text selection
+        const touchY = e.touches[0].clientY;
+        const diff = touchStartY - touchY;
+        
+        // Reset both keys first
+        gameState.keys.w = false;
+        gameState.keys.s = false;
+        
+        // If swiping up, press W key equivalent
+        if (diff > 20) {
+            gameState.keys.w = true;
+        } 
+        // If swiping down, press S key equivalent
+        else if (diff < -20) {
+            gameState.keys.s = true;
+        }
+    });
+    
+    canvas.addEventListener('touchend', (e) => {
+        e.preventDefault(); // Prevent text selection
+        gameState.keys.w = false;
+        gameState.keys.s = false;
+    });
+    
+    // Add some basic CSS for the touch controls
+    const style = document.createElement('style');
+    style.innerHTML = `
+        #touch-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            z-index: 999;
+            user-select: none; /* Prevent text selection */
+            -webkit-user-select: none; /* For Safari */
+        }
+        #movement-controls, #action-controls {
+            display: flex;
+            gap: 10px;
+            margin: 0 20px;
+        }
+        #touch-controls button {
+            width: 60px;
+            height: 60px;
+            background: rgba(255,255,255,0.5);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            color: #333;
+            font-size: 24px;
+            font-weight: bold;
+            touch-action: manipulation; /* Improved touch handling */
+            user-select: none; /* Prevent text selection */
+            -webkit-user-select: none; /* For Safari */
+            -webkit-touch-callout: none; /* Prevent iOS callout */
+        }
+    `;
+    document.head.appendChild(style);
+}
 
 // Character sprites
 const characterSprites = {
@@ -160,6 +311,11 @@ for (const enemyType in enemyTypes) {
     }
 }
 
+// Initialize input method detection when page loads
+window.addEventListener('load', () => {
+    detectKeyboard();
+});
+
 // DOM Elements
 const startScreen = document.getElementById('start-screen');
 const characterSelectScreen = document.getElementById('character-select-screen');
@@ -194,51 +350,53 @@ characters.forEach(character => {
 });
 
 // Key event listeners
-window.addEventListener('keydown', (e) => {
-    switch(e.key) {
-        case 'ArrowRight':
-            gameState.keys.right = true;
-            break;
-        case 'ArrowLeft':
-            gameState.keys.left = true;
-            break;
-        case 'ArrowUp':
-            gameState.keys.up = true;
-            break;
-        case ' ': // Spacebar
-            gameState.keys.space = true;
-            break;
-        case 'w':
-            gameState.keys.w = true;
-            break;
-        case 's':
-            gameState.keys.s = true;
-            break;
-    }
-});
+if (gameState.inputMethod.hasKeyboard) {
+    window.addEventListener('keydown', (e) => {
+        switch(e.key) {
+            case 'ArrowRight':
+                gameState.keys.right = true;
+                break;
+            case 'ArrowLeft':
+                gameState.keys.left = true;
+                break;
+            case 'ArrowUp':
+                gameState.keys.up = true;
+                break;
+            case ' ': // Spacebar
+                gameState.keys.space = true;
+                break;
+            case 'w':
+                gameState.keys.w = true;
+                break;
+            case 's':
+                gameState.keys.s = true;
+                break;
+        }
+    });
 
-window.addEventListener('keyup', (e) => {
-    switch(e.key) {
-        case 'ArrowRight':
-            gameState.keys.right = false;
-            break;
-        case 'ArrowLeft':
-            gameState.keys.left = false;
-            break;
-        case 'ArrowUp':
-            gameState.keys.up = false;
-            break;
-        case ' ': // Spacebar
-            gameState.keys.space = false;
-            break;
-        case 'w':
-            gameState.keys.w = false;
-            break;
-        case 's':
-            gameState.keys.s = false;
-            break;
-    }
-});
+    window.addEventListener('keyup', (e) => {
+        switch(e.key) {
+            case 'ArrowRight':
+                gameState.keys.right = false;
+                break;
+            case 'ArrowLeft':
+                gameState.keys.left = false;
+                break;
+            case 'ArrowUp':
+                gameState.keys.up = false;
+                break;
+            case ' ': // Spacebar
+                gameState.keys.space = false;
+                break;
+            case 'w':
+                gameState.keys.w = false;
+                break;
+            case 's':
+                gameState.keys.s = false;
+                break;
+        }
+    });
+}
 
 // Create the game over screen element
 const gameOverScreen = document.createElement('div');
@@ -334,6 +492,12 @@ function goToCharacterSelect() {
 
 function startGame() {
     changeScreen('game-screen');
+    
+    // Make sure touch controls are set up if there's no keyboard
+    if (!gameState.inputMethod.hasKeyboard && !document.getElementById('touch-controls')) {
+        setupTouchControls();
+    }
+    
     // Start the game loop
     gameLoopRunning = true;
     gameLoop();
