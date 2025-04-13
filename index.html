@@ -3,14 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Side Scrolling Game</title>
+    <title>Splats</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="Splats">
+    <link rel="apple-touch-icon" href="assets/app-icon.png">
+    <meta name="theme-color" content="#000000">
 </head>
 <body>
     <div id="game-container">
         <!-- Start Screen -->
         <div id="start-screen" class="screen active">
-            <h1>Side Scrolling Adventure</h1>
+            <h1>Splats</h1>
             <button id="start-button">Start Game</button>
         </div>
         
@@ -46,5 +52,19 @@
     </div>
     
     <script src="game.js"></script>
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(registration => {
+                        console.log('Service Worker registered with scope:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+            });
+        }
+    </script>
 </body>
 </html> 
