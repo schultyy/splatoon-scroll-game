@@ -23,7 +23,9 @@ const gameState = {
         maxChargeTime: 3000, // 3 seconds to fully charge
         barrageDuration: 1500, // 1.5 seconds of barrage
         barrageStartTime: 0,
-        isBarraging: false
+        isBarraging: false,
+        globalCooldown: 1000, // 1 second global cooldown
+        lastBarrageEndTime: 0 // Track when the last barrage ended
     },
     gravity: 0.8,
     ground: {
@@ -256,12 +258,16 @@ function update() {
 function handleChargeAttack() {
     const currentTime = Date.now();
     
+    // Check if in global cooldown
+    const isInCooldown = currentTime - gameState.player.lastBarrageEndTime < gameState.player.globalCooldown;
+    
     // Already in barrage mode
     if (gameState.player.isBarraging) {
         // Check if barrage duration has ended
         if (currentTime - gameState.player.barrageStartTime > gameState.player.barrageDuration) {
             gameState.player.isBarraging = false;
             gameState.player.chargeLevel = 0;
+            gameState.player.lastBarrageEndTime = currentTime; // Set the end time
         } else {
             // Shoot rapidly during barrage
             if (currentTime - gameState.player.lastShotTime > 100) { // Rapid fire every 100ms
@@ -269,6 +275,11 @@ function handleChargeAttack() {
                 gameState.player.lastShotTime = currentTime;
             }
         }
+        return;
+    }
+    
+    // Can't start charging if in cooldown
+    if (isInCooldown && !gameState.player.isCharging) {
         return;
     }
     
@@ -281,11 +292,6 @@ function handleChargeAttack() {
             // Calculate charge level (0 to 1)
             const elapsedChargeTime = currentTime - gameState.player.chargeStartTime;
             gameState.player.chargeLevel = Math.min(elapsedChargeTime / gameState.player.maxChargeTime, 1);
-            
-            // If fully charged, display visual cue
-            if (gameState.player.chargeLevel >= 1) {
-                // Visual feedback is handled in the draw function
-            }
         }
     } else if (gameState.player.isCharging) {
         // Release charge
@@ -339,10 +345,15 @@ function createInkSplat() {
     const direction = gameState.player.facingRight ? 1 : -1;
     const offsetX = gameState.player.facingRight ? gameState.player.width + 10 : -50;
     
+    // Determine if player is jumping - increase range and speed when in the air
+    const isJumping = gameState.player.isJumping;
+    const speedMultiplier = isJumping ? 1.75 : 1; // 75% faster when jumping
+    const particleCount = isJumping ? 15 : 12; // More particles when jumping
+    
     // Add multiple small ink particles to create a splat effect
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < particleCount; i++) {
         const angle = Math.random() * Math.PI / 2 - Math.PI / 4; // Random angle between -45 and 45 degrees
-        const speed = 3 + Math.random() * 5; // Random speed
+        const speed = (3 + Math.random() * 5) * speedMultiplier; // Random speed, increased when jumping
         
         gameState.projectiles.push({
             x: gameState.player.x + offsetX,
@@ -350,11 +361,11 @@ function createInkSplat() {
             width: 10 + Math.random() * 10, // Random size
             height: 10 + Math.random() * 10,
             speedX: speed * Math.cos(angle) * direction,
-            speedY: speed * Math.sin(angle) - 2, // Slight upward bias
+            speedY: speed * Math.sin(angle) - (isJumping ? 3 : 2), // More upward bias when jumping
             gravity: 0.2,
-            lifespan: 30 + Math.random() * 30, // Random lifespan in frames
-            age: 0,
-            color: '#00BFFF', // Light blue ink color for hero2
+            lifespan: 30 + Math.random() * (isJumping ? 45 : 30), // Longer lifespan when jumping
+            age: -5 * Math.random(), // Stagger the start times slightly
+            color: isJumping ? '#00FFFF' : '#00BFFF', // Slightly different color for jump shots
             isSplat: true
         });
     }
@@ -520,8 +531,21 @@ function drawChargeMeter() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(meterX, meterY, meterWidth, meterHeight);
     
+    // Check if in cooldown
+    const currentTime = Date.now();
+    const isInCooldown = currentTime - gameState.player.lastBarrageEndTime < gameState.player.globalCooldown;
+    
     // Draw charge level
     let fillColor = 'yellow';
+    if (isInCooldown) {
+        // During cooldown, show gray depleting bar
+        fillColor = '#555555';
+        const cooldownProgress = 1 - ((currentTime - gameState.player.lastBarrageEndTime) / gameState.player.globalCooldown);
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(meterX, meterY, meterWidth * cooldownProgress, meterHeight);
+        return;
+    }
+    
     if (gameState.player.chargeLevel >= 1) {
         fillColor = 'red'; // Fully charged
     } else if (gameState.player.isBarraging) {
@@ -535,4 +559,12 @@ function drawChargeMeter() {
         : meterWidth * gameState.player.chargeLevel;
     
     ctx.fillRect(meterX, meterY, fillWidth, meterHeight);
+    
+    // Draw marker at 1/4 charge
+    ctx.fillStyle = 'white';
+    ctx.fillRect(meterX + (meterWidth * 0.25) - 1, meterY - 2, 2, meterHeight + 4);
+    
+    // Draw marker at 1/2 charge
+    ctx.fillStyle = 'white';
+    ctx.fillRect(meterX + (meterWidth * 0.5) - 1, meterY - 2, 2, meterHeight + 4);
 } 
