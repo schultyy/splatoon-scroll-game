@@ -2,6 +2,7 @@
 const gameState = {
     currentScreen: 'start-screen',
     selectedCharacter: null,
+    gameOver: false, // Flag to track game over state
     player: {
         x: 100,
         y: 300,
@@ -16,6 +17,14 @@ const gameState = {
         lastShotTime: 0,
         shootCooldown: 350, // reduced from 500ms to 350ms for faster firing
         facingRight: true,
+        // Player health and lives
+        maxHealth: 75,
+        health: 75,
+        lives: 3,
+        invulnerable: false,
+        lastDamageTime: 0,
+        invulnerabilityDuration: 1000, // 1 second of invulnerability after taking damage
+        damageTaken: 0, // Tracks damage for the floating number
         // For hero3's charge attack
         isCharging: false,
         chargeStartTime: 0,
@@ -50,6 +59,7 @@ const gameState = {
     },
     gameObjects: [],
     projectiles: [],
+    damageNumbers: [], // Array to hold damage number indicators
     platforms: [], // Added platforms array
     camera: {
         x: 0
@@ -94,7 +104,7 @@ const enemyTypes = {
         shootCooldown: 3000, // Increased from 1000ms to 3000ms (3 seconds)
         projectileSpeed: 7,
         projectileSize: 12,
-        projectileDamage: 10,
+        projectileDamage: 5, // Set to exactly 5 damage per hit
         detectionRange: 400 // Range to detect player and start shooting
     }
 };
@@ -183,6 +193,93 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
+// Create the game over screen element
+const gameOverScreen = document.createElement('div');
+gameOverScreen.id = 'game-over-screen';
+gameOverScreen.className = 'screen';
+gameOverScreen.innerHTML = `
+    <div class="screen-content">
+        <h1>Game Over</h1>
+        <p>You ran out of lives!</p>
+        <button id="restart-button">Play Again</button>
+    </div>
+`;
+document.body.appendChild(gameOverScreen);
+
+// Add CSS for game over screen
+const gameOverStyles = document.createElement('style');
+gameOverStyles.textContent = `
+    #game-over-screen {
+        display: none;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        z-index: 100;
+    }
+    
+    #game-over-screen.active {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .screen-content {
+        background-color: #222;
+        border-radius: 10px;
+        padding: 40px;
+        text-align: center;
+        box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+        transform: scale(0.9);
+        animation: pop-in 0.5s forwards;
+    }
+    
+    @keyframes pop-in {
+        0% { transform: scale(0.5); opacity: 0; }
+        70% { transform: scale(1.1); opacity: 1; }
+        100% { transform: scale(1); opacity: 1; }
+    }
+    
+    #game-over-screen h1 {
+        color: #FF0000;
+        font-size: 48px;
+        margin-bottom: 20px;
+        text-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    }
+    
+    #game-over-screen p {
+        color: #FFF;
+        font-size: 24px;
+        margin-bottom: 30px;
+    }
+    
+    #restart-button {
+        background-color: #FF0000;
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        font-size: 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s, transform 0.3s;
+    }
+    
+    #restart-button:hover {
+        background-color: #FF3333;
+        transform: scale(1.05);
+    }
+    
+    #restart-button:active {
+        transform: scale(0.95);
+    }
+`;
+document.head.appendChild(gameOverStyles);
+
+// Add event listener to the restart button
+document.getElementById('restart-button').addEventListener('click', restartGame);
+
 // Screen Navigation Functions
 function goToCharacterSelect() {
     changeScreen('character-select-screen');
@@ -191,6 +288,7 @@ function goToCharacterSelect() {
 function startGame() {
     changeScreen('game-screen');
     // Start the game loop
+    gameLoopRunning = true;
     gameLoop();
 }
 
@@ -386,6 +484,12 @@ function isPositionOverlapping(position, occupiedPositions) {
 
 // Game Functions
 function gameLoop() {
+    // Skip updates if game is over
+    if (gameState.gameOver) {
+        gameLoopRunning = false;
+        return;
+    }
+    
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
@@ -490,6 +594,17 @@ function update() {
     
     // Update enemies
     updateEnemies();
+    
+    // Update damage numbers
+    updateDamageNumbers();
+    
+    // Check for end of invulnerability period
+    if (gameState.player.invulnerable) {
+        const currentTime = Date.now();
+        if (currentTime - gameState.player.lastDamageTime > gameState.player.invulnerabilityDuration) {
+            gameState.player.invulnerable = false;
+        }
+    }
 }
 
 // Function to handle charge attack for hero3
@@ -514,14 +629,14 @@ function handleChargeAttack() {
                 let damageMultiplier = 1;
                 
                 if (chargeDuration >= 1500) { // Full charge (1.5s)
-                    damageMultiplier = 2.0;
+                    damageMultiplier = 1.5; // Reduced from 2.0 to 1.5
                 } else if (chargeDuration >= 750) { // Half charge (0.75s)
-                    damageMultiplier = 1.5;
+                    damageMultiplier = 1.25; // Reduced from 1.5 to 1.25
                 } else if (chargeDuration >= 500) { // Quarter charge (0.5s)
-                    damageMultiplier = 1.2;
+                    damageMultiplier = 1.1; // Reduced from 1.2 to 1.1
                 }
                 
-                // Shoot with enhanced damage
+                // Shoot with reduced enhanced damage
                 shootChargedInk(damageMultiplier);
                 gameState.player.lastShotTime = currentTime;
             }
@@ -581,7 +696,7 @@ function shootChargedInk(damageMultiplier) {
     const direction = gameState.player.facingRight ? 1 : -1;
     const offsetX = gameState.player.facingRight ? gameState.player.width : 0;
     
-    // Charged shots are larger and more powerful
+    // Charged shots are larger and more powerful, but with reduced damage
     gameState.projectiles.push({
         x: gameState.player.x + offsetX,
         y: gameState.player.y + gameState.player.height / 2,
@@ -589,7 +704,7 @@ function shootChargedInk(damageMultiplier) {
         height: 18,
         speed: 12 * direction, // Faster projectile
         color: '#800080', // Purple ink color for charged shots
-        damage: 20 * damageMultiplier, // High damage, multiplied by charge level
+        damage: 10 * damageMultiplier, // Reduced from 20 to 10 base damage, still multiplied by charge level
         canDamage: true
     });
 }
@@ -626,7 +741,7 @@ function createInkSplat() {
     // Determine if player is jumping - increase range and speed when in the air
     const isJumping = gameState.player.isJumping;
     const speedMultiplier = isJumping ? 1.75 : 1; // 75% faster when jumping
-    const particleCount = isJumping ? 15 : 12; // More particles when jumping
+    const particleCount = isJumping ? 10 : 8; // Reduced particles
     const damageMultiplier = isJumping ? 1.5 : 1; // More damage when jumping
     
     // Add multiple small ink particles to create a splat effect
@@ -642,7 +757,7 @@ function createInkSplat() {
             speedX: speed * Math.cos(angle) * direction,
             speedY: speed * Math.sin(angle) - (isJumping ? 3 : 2), // More upward bias when jumping
             gravity: 0.2,
-            lifespan: 30 + Math.random() * (isJumping ? 45 : 30), // Longer lifespan when jumping
+            lifespan: 20 + Math.random() * (isJumping ? 30 : 20), // Slightly shorter lifespan
             age: -5 * Math.random(), // Stagger the start times slightly
             color: isJumping ? '#00FFFF' : '#00BFFF', // Slightly different color for jump shots
             isSplat: true,
@@ -690,10 +805,21 @@ function checkContactDamage() {
             player.y < enemy.y + enemy.height &&
             player.y + player.height > enemy.y) {
             
+            // Store old health to calculate damage
+            const oldHealth = enemy.health;
+            
             // Apply damage (prevent negative health)
             enemy.health = Math.max(0, enemy.health - 10);
             enemy.damaged = true;
             enemy.damageTime = Date.now();
+            
+            // Calculate actual damage dealt
+            const damageDealt = oldHealth - enemy.health;
+            
+            // Create damage number at the contact point
+            const contactX = (player.x + player.width/2 + enemy.x + enemy.width/2) / 2;
+            const contactY = (player.y + player.height/2 + enemy.y + enemy.height/2) / 2;
+            createDamageNumber(contactX, contactY, damageDealt);
             
             // Create ink splat effect at contact point
             createContactDamageSplat(enemy);
@@ -708,8 +834,10 @@ function createContactDamageSplat(enemy) {
         y: (gameState.player.y + gameState.player.height/2 + enemy.y + enemy.height/2) / 2
     };
     
-    // Add multiple small ink particles to create a splat effect
-    for (let i = 0; i < 8; i++) {
+    // Reduced particle count to improve performance
+    const particleCount = 5; 
+    
+    for (let i = 0; i < particleCount; i++) {
         const angle = Math.random() * Math.PI * 2; // Random angle in all directions
         const speed = 2 + Math.random() * 3; // Random speed
         
@@ -721,7 +849,7 @@ function createContactDamageSplat(enemy) {
             speedX: speed * Math.cos(angle),
             speedY: speed * Math.sin(angle),
             gravity: 0.2,
-            lifespan: 15 + Math.random() * 20, // Short lifespan
+            lifespan: 10 + Math.random() * 10, // Shorter lifespan
             age: 0,
             color: '#FF00FF', // Bright purple ink for contact damage
             isSplat: true,
@@ -741,10 +869,19 @@ function checkProjectileCollisions(projectile) {
             projectile.y < enemy.y + enemy.height &&
             projectile.y + projectile.height > enemy.y) {
             
+            // Store the old health to calculate damage
+            const oldHealth = enemy.health;
+            
             // Apply damage
             enemy.health = Math.max(0, enemy.health - (projectile.damage || 15)); // Prevent negative health
             enemy.damaged = true;
             enemy.damageTime = Date.now();
+            
+            // Calculate actual damage dealt
+            const damageDealt = oldHealth - enemy.health;
+            
+            // Create damage number display
+            createDamageNumber(projectile.x, projectile.y, damageDealt);
             
             // Non-splat projectiles are removed on impact
             if (!projectile.isSplat) {
@@ -758,10 +895,44 @@ function checkProjectileCollisions(projectile) {
     return false; // No hit
 }
 
-// Update projectiles
+// Update projectiles with performance improvements
 function updateProjectiles() {
+    // Limit the maximum number of projectiles to prevent lag
+    const MAX_PROJECTILES = 100;
+    if (gameState.projectiles.length > MAX_PROJECTILES) {
+        // Remove oldest projectiles first (splats and visual effects)
+        const nonEssentialProjectiles = gameState.projectiles.filter(p => 
+            p.isSplat && !p.canDamage
+        );
+        
+        // Sort by age if they have age property
+        nonEssentialProjectiles.sort((a, b) => (b.age || 0) - (a.age || 0));
+        
+        // Remove oldest non-essential projectiles until we're under the limit
+        while (gameState.projectiles.length > MAX_PROJECTILES && nonEssentialProjectiles.length > 0) {
+            const oldestSplat = nonEssentialProjectiles.pop();
+            const index = gameState.projectiles.indexOf(oldestSplat);
+            if (index !== -1) {
+                gameState.projectiles.splice(index, 1);
+            }
+        }
+    }
+
+    // Process projectiles from end to start to safely remove
     for (let i = gameState.projectiles.length - 1; i >= 0; i--) {
         const projectile = gameState.projectiles[i];
+        
+        // Skip processing if projectile is off-screen (optimization)
+        if (projectile.x < gameState.camera.x - 100 || 
+            projectile.x > gameState.camera.x + canvas.width + 100 ||
+            projectile.y > canvas.height + 100) {
+            
+            // If it's just a visual effect, remove it immediately to save processing
+            if (projectile.isSplat && !projectile.canDamage) {
+                gameState.projectiles.splice(i, 1);
+                continue;
+            }
+        }
         
         if (projectile.isSplat) {
             // Update splat projectile with gravity and age
@@ -779,33 +950,71 @@ function updateProjectiles() {
                 }
             }
             
+            // Check for collisions with platforms or ground
+            if (checkProjectilePlatformCollision(projectile)) {
+                gameState.projectiles.splice(i, 1);
+                continue;
+            }
+            
             // Remove if too old
             if (projectile.age > projectile.lifespan) {
                 gameState.projectiles.splice(i, 1);
             }
-        } else {
-            // Normal projectile movement
-            projectile.x += projectile.speed;
+        } else if (projectile.isEnemyProjectile) {
+            // Apply gravity to enemy projectiles for arc
+            projectile.speedY += projectile.gravity;
             
-            // Check for collisions based on projectile type
+            // Update position
+            projectile.x += projectile.speedX;
+            projectile.y += projectile.speedY;
+            
+            // Check for collision with player
+            if (projectile.canDamage && checkPlayerProjectileCollision(projectile)) {
+                gameState.projectiles.splice(i, 1);
+                continue;
+            }
+            
+            // Check for collisions with platforms or ground
+            if (checkProjectilePlatformCollision(projectile)) {
+                // Create splash effect on impact (with reduced particles)
+                createProjectileSplashEffect(projectile, true);
+                gameState.projectiles.splice(i, 1);
+                continue;
+            }
+            
+            // Remove projectile if off screen
+            if (projectile.x > gameState.camera.x + canvas.width + 100 || 
+                projectile.x < gameState.camera.x - 100 ||
+                projectile.y > canvas.height + 100) {
+                gameState.projectiles.splice(i, 1);
+            }
+        } else {
+            // Normal player projectile movement
+            if (projectile.speed) {
+                // Legacy projectiles with single speed value
+                projectile.x += projectile.speed;
+            } else {
+                // Projectiles with separate x and y speeds
+                projectile.x += projectile.speedX || 0;
+                projectile.y += projectile.speedY || 0;
+            }
+            
+            // Check for collisions with enemies
             if (projectile.canDamage) {
-                if (projectile.isEnemyProjectile) {
-                    // Check for collision with player
-                    if (checkPlayerProjectileCollision(projectile)) {
-                        gameState.projectiles.splice(i, 1);
-                        continue;
-                    }
-                } else {
-                    // Check for collision with enemies
-                    const hitEnemy = checkProjectileCollisions(projectile);
-                    if (hitEnemy) {
-                        gameState.projectiles.splice(i, 1);
-                        continue;
-                    }
+                const hitEnemy = checkProjectileCollisions(projectile);
+                if (hitEnemy) {
+                    gameState.projectiles.splice(i, 1);
+                    continue;
                 }
             }
             
-            // Remove projectile if off screen (either direction)
+            // Check for collisions with platforms or ground
+            if (checkProjectilePlatformCollision(projectile)) {
+                gameState.projectiles.splice(i, 1);
+                continue;
+            }
+            
+            // Remove projectile if off screen
             if (projectile.x > gameState.camera.x + canvas.width + 100 || 
                 projectile.x < gameState.camera.x - 100) {
                 gameState.projectiles.splice(i, 1);
@@ -818,17 +1027,23 @@ function updateProjectiles() {
 function checkPlayerProjectileCollision(projectile) {
     const player = gameState.player;
     
+    // Skip if player is invulnerable
+    if (player.invulnerable) {
+        return false;
+    }
+    
     // Simple collision detection
     if (projectile.x < player.x + player.width &&
         projectile.x + projectile.width > player.x &&
         projectile.y < player.y + player.height &&
         projectile.y + projectile.height > player.y) {
         
+        // Apply damage to player
+        const damageTaken = enemyTypes.octoSlob.projectileDamage;
+        applyDamageToPlayer(damageTaken);
+        
         // Create a splash effect
         createPlayerHitEffect(projectile);
-        
-        // In a real game, you would apply damage to the player here
-        // For this demo, we'll just show the hit effect
         
         return true; // Hit detected
     }
@@ -836,10 +1051,69 @@ function checkPlayerProjectileCollision(projectile) {
     return false; // No hit
 }
 
-// Create splash effect when player is hit
+// Apply damage to player and handle life loss
+function applyDamageToPlayer(amount) {
+    const player = gameState.player;
+    
+    // Store the damage for floating number
+    player.damageTaken = amount;
+    
+    // Create floating damage number above player
+    createDamageNumber(
+        player.x + player.width / 2,
+        player.y - 20,
+        amount,
+        true // Flag as player damage
+    );
+    
+    // Decrease health (ensure it doesn't go below 0)
+    player.health = Math.max(0, player.health - amount);
+    
+    // Check if health depleted
+    if (player.health <= 0) {
+        player.lives--;
+        
+        // Game over if no lives left
+        if (player.lives <= 0) {
+            // Handle game over
+            showGameOver();
+        } else {
+            // Reset health for next life
+            player.health = player.maxHealth;
+        }
+    }
+    
+    // Set invulnerable state
+    player.invulnerable = true;
+    player.lastDamageTime = Date.now();
+}
+
+// Create a floating damage number
+function createDamageNumber(x, y, damage, isPlayerDamage = false) {
+    // Don't create numbers for zero damage
+    if (damage <= 0) return;
+    
+    gameState.damageNumbers.push({
+        x: x,
+        y: y - 20, // Start slightly above the impact point
+        value: damage,
+        // Red for player damage, otherwise use color based on damage amount
+        color: isPlayerDamage ? '#FF0000' : 
+               (damage >= 20 ? '#FF0000' : damage >= 10 ? '#FFA500' : '#FFFF00'),
+        age: 0,
+        lifespan: 40, // How many frames it will stay visible
+        velocityY: -1.5, // Move upward
+        velocityX: (Math.random() - 0.5) * 1.5, // Slight random horizontal movement
+        isPlayerDamage: isPlayerDamage
+    });
+}
+
+// Create splash effect when player is hit (optimized)
 function createPlayerHitEffect(projectile) {
-    // Add multiple small ink particles to create a splat effect
-    for (let i = 0; i < 10; i++) {
+    // Reduced particle count to improve performance
+    const particleCount = 6;
+    
+    for (let i = 0; i < particleCount; i++) {
         const angle = Math.random() * Math.PI * 2; // Random angle in all directions
         const speed = 2 + Math.random() * 3; // Random speed
         
@@ -848,10 +1122,10 @@ function createPlayerHitEffect(projectile) {
             y: projectile.y,
             width: 8 + Math.random() * 8, // Random size
             height: 8 + Math.random() * 8,
-            speedX: speed * Math.cos(angle),
-            speedY: speed * Math.sin(angle),
+            speedX: Math.cos(angle) * speed,
+            speedY: Math.sin(angle) * speed,
             gravity: 0.2,
-            lifespan: 15 + Math.random() * 20, // Short lifespan
+            lifespan: 10 + Math.random() * 10, // Shorter lifespan
             age: 0,
             color: projectile.color, // Same color as the projectile
             isSplat: true,
@@ -913,21 +1187,39 @@ function updateEnemies() {
 
 // Function for enemies to shoot ink
 function enemyShootInk(enemy) {
-    // Determine direction to player
-    const direction = enemy.facingRight ? 1 : -1;
-    const offsetX = enemy.facingRight ? enemy.width : 0;
+    // Calculate direction to player (actual angle, not just left/right)
+    const playerCenterX = gameState.player.x + gameState.player.width / 2;
+    const playerCenterY = gameState.player.y + gameState.player.height / 2;
+    const enemyCenterX = enemy.x + enemy.width / 2;
+    const enemyCenterY = enemy.y + enemy.height / 2;
     
-    // Create enemy ink projectile
+    // Calculate angle between enemy and player
+    const dx = playerCenterX - enemyCenterX;
+    const dy = playerCenterY - enemyCenterY;
+    const angle = Math.atan2(dy, dx);
+    
+    // Calculate velocity components based on angle
+    const speed = enemyTypes.octoSlob.projectileSpeed;
+    const velocityX = Math.cos(angle) * speed;
+    const velocityY = Math.sin(angle) * speed;
+    
+    // Update enemy facing direction based on player position
+    enemy.facingRight = dx > 0;
+    
+    // Create enemy ink projectile with directional velocity
     gameState.projectiles.push({
-        x: enemy.x + offsetX,
-        y: enemy.y + enemy.height / 2,
+        x: enemyCenterX,
+        y: enemyCenterY,
         width: enemyTypes.octoSlob.projectileSize,
         height: enemyTypes.octoSlob.projectileSize,
-        speed: enemyTypes.octoSlob.projectileSpeed * direction,
+        speedX: velocityX,
+        speedY: velocityY,
+        angle: angle, // Store the angle for reference
         color: '#FF4500', // Orange-red ink color for enemies
-        damage: enemyTypes.octoSlob.projectileDamage,
+        damage: enemyTypes.octoSlob.projectileDamage, // Use the value from enemyTypes
         canDamage: true,
-        isEnemyProjectile: true // Flag to identify enemy projectiles
+        isEnemyProjectile: true, // Flag to identify enemy projectiles
+        gravity: 0.05 // Add slight gravity for more natural arc
     });
 }
 
@@ -956,6 +1248,9 @@ function draw() {
     
     // Draw projectiles
     drawProjectiles();
+    
+    // Draw damage numbers (after projectiles but before UI elements)
+    drawDamageNumbers();
     
     // Draw charge meter if charging
     if (gameState.player.isCharging || gameState.player.isBarraging) {
@@ -1010,6 +1305,9 @@ function draw() {
             gameState.player.height
         );
     }
+    
+    // Draw player health bar and lives
+    drawPlayerHealthAndLives();
     
     // Optionally, visualize the boundaries for debugging
     if (false) { // Set to true to see the boundaries
@@ -1240,7 +1538,15 @@ function drawContactDamageEffect() {
 
 // Draw projectiles
 function drawProjectiles() {
-    gameState.projectiles.forEach(projectile => {
+    // Only process projectiles within the visible area plus a small buffer
+    const visibleProjectiles = gameState.projectiles.filter(projectile => {
+        return projectile.x >= gameState.camera.x - 50 && 
+               projectile.x <= gameState.camera.x + canvas.width + 50 &&
+               projectile.y >= 0 &&
+               projectile.y <= canvas.height + 50;
+    });
+
+    visibleProjectiles.forEach(projectile => {
         if (projectile.isSplat) {
             // Draw splat with decreasing opacity as it ages
             const opacity = 1 - (projectile.age / projectile.lifespan);
@@ -1255,6 +1561,30 @@ function drawProjectiles() {
                 Math.PI * 2
             );
             ctx.fill();
+        } else if (projectile.isEnemyProjectile) {
+            // Draw enemy projectile with slight elongation in the direction of travel
+            const angle = Math.atan2(projectile.speedY, projectile.speedX);
+            const stretchFactor = 1.3; // Elongation factor
+            
+            ctx.save();
+            ctx.translate(projectile.x - gameState.camera.x, projectile.y);
+            ctx.rotate(angle);
+            
+            // Draw elongated ink drop
+            ctx.fillStyle = projectile.color;
+            ctx.beginPath();
+            ctx.ellipse(
+                0, 
+                0, 
+                (projectile.width / 2) * stretchFactor, 
+                projectile.height / 2,
+                0, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.fill();
+            
+            ctx.restore();
         } else {
             // Normal projectile
             ctx.fillStyle = projectile.color;
@@ -1385,4 +1715,285 @@ function checkPlatformCollisions() {
             break; // Exit after first platform collision
         }
     }
-} 
+}
+
+// Check if a projectile collides with a platform or the ground
+function checkProjectilePlatformCollision(projectile) {
+    // Check collision with ground
+    if (projectile.y + projectile.height/2 >= gameState.ground.y) {
+        createProjectileSplashEffect(projectile, true);
+        return true;
+    }
+    
+    // Check collision with platforms
+    for (const platform of gameState.platforms) {
+        // Simple collision detection
+        if (projectile.x - projectile.width/2 < platform.x + platform.width &&
+            projectile.x + projectile.width/2 > platform.x &&
+            projectile.y - projectile.height/2 < platform.y + platform.height &&
+            projectile.y + projectile.height/2 > platform.y) {
+            
+            // If hitting the top surface of the platform (more likely for arcing projectiles)
+            if (projectile.y + projectile.height/2 > platform.y && 
+                projectile.y - projectile.height/2 < platform.y) {
+                createProjectileSplashEffect(projectile, true);
+                return true;
+            }
+            
+            // For side or bottom collisions (less common but possible)
+            if (Math.abs(projectile.speedY) > 2 || Math.abs(projectile.speedX) > 2) {
+                createProjectileSplashEffect(projectile, true);
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+// Create splash effect when projectile hits a surface (with optimization flag)
+function createProjectileSplashEffect(projectile, reduced = false) {
+    // Reduce particle count to improve performance
+    const baseCount = reduced ? 3 : 5; 
+    const particleCount = Math.min(Math.floor(baseCount + (projectile.width / 5)), 8);
+    
+    for (let i = 0; i < particleCount; i++) {
+        // Create splash effect with particles that spread out from impact point
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 2;
+        
+        gameState.projectiles.push({
+            x: projectile.x,
+            y: projectile.y,
+            width: projectile.width * 0.6 * Math.random(),
+            height: projectile.height * 0.6 * Math.random(),
+            speedX: Math.cos(angle) * speed,
+            speedY: Math.sin(angle) * speed - 1, // Slight upward bias
+            gravity: 0.2,
+            lifespan: 8 + Math.random() * 8, // Shorter lifespan
+            age: 0,
+            color: projectile.color,
+            isSplat: true,
+            canDamage: false // Splash effects don't cause damage
+        });
+    }
+}
+
+// Update damage numbers
+function updateDamageNumbers() {
+    for (let i = gameState.damageNumbers.length - 1; i >= 0; i--) {
+        const number = gameState.damageNumbers[i];
+        
+        // Update position
+        number.x += number.velocityX;
+        number.y += number.velocityY;
+        
+        // Update age
+        number.age++;
+        
+        // Remove if too old
+        if (number.age >= number.lifespan) {
+            gameState.damageNumbers.splice(i, 1);
+        }
+    }
+}
+
+// Draw damage numbers
+function drawDamageNumbers() {
+    gameState.damageNumbers.forEach(number => {
+        const opacity = 1 - (number.age / number.lifespan);
+        const scale = 1 + (1 - opacity) * 0.5; // Grow slightly as it fades
+        
+        ctx.save();
+        ctx.translate(number.x - gameState.camera.x, number.y);
+        ctx.scale(scale, scale);
+        
+        // Draw with shadow for better visibility
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = 3;
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
+        
+        // Draw the number
+        ctx.fillStyle = number.color + Math.floor(opacity * 255).toString(16).padStart(2, '0');
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.round(number.value), 0, 0);
+        
+        ctx.restore();
+    });
+}
+
+// Draw player health bar and lives
+function drawPlayerHealthAndLives() {
+    const player = gameState.player;
+    
+    // Health bar settings
+    const healthBarWidth = 150;
+    const healthBarHeight = 15;
+    const healthBarX = 20;
+    const healthBarY = 20;
+    
+    // Health bar background
+    ctx.fillStyle = 'rgba(50, 50, 50, 0.7)';
+    ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+    
+    // Health bar fill
+    let healthPercentage = player.health / player.maxHealth;
+    
+    // Health bar color based on health percentage
+    let healthColor;
+    if (healthPercentage > 0.6) {
+        healthColor = 'rgba(0, 255, 0, 0.8)'; // Green
+    } else if (healthPercentage > 0.3) {
+        healthColor = 'rgba(255, 255, 0, 0.8)'; // Yellow
+    } else {
+        healthColor = 'rgba(255, 0, 0, 0.8)'; // Red
+    }
+    
+    // Flashing effect when invulnerable
+    if (player.invulnerable && Math.floor(Date.now() / 100) % 2 === 0) {
+        healthColor = 'rgba(255, 255, 255, 0.8)'; // Flash white
+    }
+    
+    ctx.fillStyle = healthColor;
+    ctx.fillRect(healthBarX, healthBarY, healthBarWidth * healthPercentage, healthBarHeight);
+    
+    // Health bar border
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+    
+    // Health text
+    ctx.fillStyle = 'white';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+        `${Math.ceil(player.health)}/${player.maxHealth}`,
+        healthBarX + healthBarWidth / 2,
+        healthBarY + healthBarHeight - 3
+    );
+    
+    // Draw lives
+    const lifeSize = 20;
+    const lifeSpacing = 5;
+    const livesStartX = healthBarX;
+    const livesY = healthBarY + healthBarHeight + 10;
+    
+    // Draw hearts for lives
+    for (let i = 0; i < player.lives; i++) {
+        drawHeart(
+            livesStartX + i * (lifeSize + lifeSpacing),
+            livesY,
+            lifeSize
+        );
+    }
+    
+    // Draw player invulnerability effect
+    if (player.invulnerable) {
+        const drawX = player.x - gameState.camera.x;
+        
+        // Draw translucent shield effect
+        ctx.save();
+        ctx.globalAlpha = 0.3 + Math.sin(Date.now() / 100) * 0.2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(
+            drawX + player.width/2,
+            player.y + player.height/2,
+            player.width/2 + 5,
+            0,
+            Math.PI * 2
+        );
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// Draw a heart for player lives
+function drawHeart(x, y, size) {
+    ctx.save();
+    
+    ctx.fillStyle = '#FF0000';
+    ctx.beginPath();
+    
+    // Draw heart shape
+    ctx.moveTo(x + size/2, y + size/5);
+    // Left curve
+    ctx.bezierCurveTo(
+        x + size/2, y, 
+        x, y, 
+        x, y + size/3
+    );
+    // Left bottom part
+    ctx.bezierCurveTo(
+        x, y + size/1.5, 
+        x + size/2, y + size, 
+        x + size/2, y + size
+    );
+    // Right bottom part
+    ctx.bezierCurveTo(
+        x + size/2, y + size, 
+        x + size, y + size/1.5, 
+        x + size, y + size/3
+    );
+    // Right curve
+    ctx.bezierCurveTo(
+        x + size, y, 
+        x + size/2, y, 
+        x + size/2, y + size/5
+    );
+    
+    ctx.fill();
+    ctx.restore();
+}
+
+// Show game over screen
+function showGameOver() {
+    gameState.gameOver = true;
+    changeScreen('game-over-screen');
+}
+
+// Restart the game
+function restartGame() {
+    // Reset game state
+    gameState.gameOver = false;
+    gameState.player.health = gameState.player.maxHealth;
+    gameState.player.lives = 3;
+    gameState.player.x = 100;
+    gameState.player.y = 300;
+    gameState.player.velocityY = 0;
+    gameState.player.isJumping = false;
+    gameState.camera.x = 0;
+    
+    // Reset player ability states
+    gameState.player.isCharging = false;
+    gameState.player.chargeLevel = 0;
+    gameState.player.isBarraging = false;
+    gameState.player.contactDamageActive = false;
+    gameState.player.invulnerable = false;
+    
+    // Clear projectiles and damage numbers
+    gameState.projectiles = [];
+    gameState.damageNumbers = [];
+    
+    // Generate new enemies
+    generateEnemies();
+    
+    // Go back to game screen
+    changeScreen('game-screen');
+    
+    // Restart game loop
+    if (!gameLoopRunning) {
+        gameLoopRunning = true;
+        requestAnimationFrame(gameLoop);
+    } else {
+        // If game loop is technically still running but paused due to game over
+        // We need to force a new animation frame to get things going again
+        requestAnimationFrame(gameLoop);
+    }
+}
+
+// Track if game loop is running
+let gameLoopRunning = false; 
