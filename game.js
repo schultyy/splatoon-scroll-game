@@ -20,6 +20,7 @@ const gameState = {
         // Player health and lives
         maxHealth: 75,
         health: 75,
+        temporaryArmor: 0, // Temporary armor health points
         lives: 3,
         invulnerable: false,
         lastDamageTime: 0,
@@ -60,6 +61,8 @@ const gameState = {
     gameObjects: [],
     projectiles: [],
     damageNumbers: [], // Array to hold damage number indicators
+    healthPickups: [], // Array to hold health pickup items
+    armorPickups: [], // Array to hold armor pickup items
     platforms: [], // Added platforms array
     camera: {
         x: 0
@@ -106,6 +109,24 @@ const enemyTypes = {
         projectileSize: 12,
         projectileDamage: 5, // Set to exactly 5 damage per hit
         detectionRange: 400 // Range to detect player and start shooting
+    },
+    octoling: {
+        width: 60,
+        height: 60,
+        color: '#9932CC', // Fallback color (purple)
+        health: 150,
+        name: 'Octoling',
+        src: 'assets/octoling.jpg',
+        shootCooldown: 1500, // Faster firing than octoslob
+        projectileSpeed: 10,
+        projectileSize: 15,
+        projectileDamage: 8, // More damage than octoslob
+        detectionRange: 500, // Larger detection range
+        movementSpeed: 2, // Movement speed
+        jumpForce: 10, // Jump force for platform navigation
+        jumpCooldown: 2000, // Time between jumps
+        movementRange: 200, // How far it will move in one direction
+        canJumpPlatforms: true // Can jump between platforms
     }
 };
 
@@ -380,101 +401,132 @@ function generateEnemies() {
         generatePlatforms();
     }
     
-    // Increased number of enemies to populate both left and right sides
-    const enemyCount = 8;
+    // Reduced number of enemies to make room for octolings
+    const octoSlobCount = 6;
+    const octolingCount = 2; // Add 2 octolings
     
     // Keep track of occupied positions to prevent overlap
     const occupiedPositions = [];
     
-    for (let i = 0; i < enemyCount; i++) {
-        // Create a pool of possible spawn positions
-        const possiblePositions = [];
-        
-        // Add ground positions across the entire world (both left and right)
-        // Distribute evenly with some randomness
-        if (i < enemyCount / 2) {
-            // Left side and middle spawn
-            possiblePositions.push({
-                x: gameState.worldBoundaries.left + 100 + (i * 300) + Math.random() * 100,
-                y: gameState.ground.y - enemyTypes.octoSlob.height,
-                onPlatform: false
-            });
-        } else {
-            // Right side spawn
-            possiblePositions.push({
-                x: 400 + ((i - enemyCount/2) * 500) + Math.random() * 200,
-                y: gameState.ground.y - enemyTypes.octoSlob.height,
-                onPlatform: false
-            });
-        }
-        
-        // Add platform positions - consider ALL platforms including left side
-        gameState.platforms.forEach(platform => {
-            // Only add as spawn point if platform is wide enough
-            if (platform.width >= enemyTypes.octoSlob.width + 20) {
-                possiblePositions.push({
-                    x: platform.x + Math.random() * (platform.width - enemyTypes.octoSlob.width),
-                    y: platform.y - enemyTypes.octoSlob.height, // On top of platform
-                    onPlatform: true
-                });
-            }
-        });
-        
-        // Filter out positions that would overlap with existing enemies
-        const nonOverlappingPositions = possiblePositions.filter(pos => {
-            return !isPositionOverlapping(pos, occupiedPositions);
-        });
-        
-        // If no non-overlapping positions, skip this enemy
-        if (nonOverlappingPositions.length === 0) {
-            continue;
-        }
-        
-        // Choose a random position from the filtered pool
-        const randomPositionIndex = Math.floor(Math.random() * nonOverlappingPositions.length);
-        const spawnPosition = nonOverlappingPositions[randomPositionIndex];
-        
-        // Mark this position as occupied for future enemies
-        occupiedPositions.push({
-            x: spawnPosition.x,
-            y: spawnPosition.y,
-            width: enemyTypes.octoSlob.width,
-            height: enemyTypes.octoSlob.height
-        });
-        
-        // Create the enemy at the selected position
-        gameState.enemies.push({
-            x: spawnPosition.x,
-            y: spawnPosition.y,
-            width: enemyTypes.octoSlob.width,
-            height: enemyTypes.octoSlob.height,
-            health: enemyTypes.octoSlob.health,
-            damaged: false,
-            damageTime: 0,
-            type: 'octoSlob',
-            color: enemyTypes.octoSlob.color,
-            animationFrame: Math.floor(Math.random() * 4), // Random starting frame
-            animationSpeed: 0.1,
-            animationCounter: 0,
-            direction: Math.random() > 0.5 ? 1 : -1, // Random initial direction
-            tentaclePhase: Math.random() * Math.PI * 2, // Random tentacle phase
-            lastShotTime: Date.now() - Math.random() * 3000, // Stagger initial shooting times
-            facingRight: true, // Direction enemy is facing
-            onPlatform: spawnPosition.onPlatform // Track if enemy is on a platform
-        });
+    // Create OctoSlobs
+    for (let i = 0; i < octoSlobCount; i++) {
+        createEnemy('octoSlob', i, octoSlobCount, occupiedPositions);
+    }
+    
+    // Create Octolings
+    for (let i = 0; i < octolingCount; i++) {
+        createEnemy('octoling', i, octolingCount, occupiedPositions);
     }
 }
 
+// Helper function to create an enemy
+function createEnemy(type, index, count, occupiedPositions) {
+    // Create a pool of possible spawn positions
+    const possiblePositions = [];
+    
+    // Calculate spawn range based on index
+    if (index < count / 2) {
+        // Left side and middle spawn
+        possiblePositions.push({
+            x: gameState.worldBoundaries.left + 100 + (index * 400) + Math.random() * 200,
+            y: gameState.ground.y - enemyTypes[type].height,
+            onPlatform: false
+        });
+    } else {
+        // Right side spawn
+        possiblePositions.push({
+            x: 500 + ((index - count/2) * 500) + Math.random() * 300,
+            y: gameState.ground.y - enemyTypes[type].height,
+            onPlatform: false
+        });
+    }
+    
+    // Add platform positions - consider ALL platforms including left side
+    gameState.platforms.forEach(platform => {
+        // Only add as spawn point if platform is wide enough
+        if (platform.width >= enemyTypes[type].width + 20) {
+            possiblePositions.push({
+                x: platform.x + Math.random() * (platform.width - enemyTypes[type].width),
+                y: platform.y - enemyTypes[type].height, // On top of platform
+                onPlatform: true,
+                platformId: gameState.platforms.indexOf(platform) // Store platform reference
+            });
+        }
+    });
+    
+    // Filter out positions that would overlap with existing enemies
+    const nonOverlappingPositions = possiblePositions.filter(pos => {
+        return !isPositionOverlapping(pos, occupiedPositions, enemyTypes[type].width, enemyTypes[type].height);
+    });
+    
+    // If no non-overlapping positions, skip this enemy
+    if (nonOverlappingPositions.length === 0) {
+        return;
+    }
+    
+    // Choose a random position from the filtered pool
+    const randomPositionIndex = Math.floor(Math.random() * nonOverlappingPositions.length);
+    const spawnPosition = nonOverlappingPositions[randomPositionIndex];
+    
+    // Mark this position as occupied for future enemies
+    occupiedPositions.push({
+        x: spawnPosition.x,
+        y: spawnPosition.y,
+        width: enemyTypes[type].width,
+        height: enemyTypes[type].height
+    });
+    
+    // Create base enemy object
+    const enemy = {
+        x: spawnPosition.x,
+        y: spawnPosition.y,
+        width: enemyTypes[type].width,
+        height: enemyTypes[type].height,
+        health: enemyTypes[type].health,
+        damaged: false,
+        damageTime: 0,
+        type: type,
+        color: enemyTypes[type].color,
+        animationFrame: Math.floor(Math.random() * 4), // Random starting frame
+        animationSpeed: 0.1,
+        animationCounter: 0,
+        direction: Math.random() > 0.5 ? 1 : -1, // Random initial direction
+        tentaclePhase: Math.random() * Math.PI * 2, // Random tentacle phase
+        lastShotTime: Date.now() - Math.random() * 3000, // Stagger initial shooting times
+        facingRight: true, // Direction enemy is facing
+        onPlatform: spawnPosition.onPlatform, // Track if enemy is on a platform
+    };
+    
+    // Add type-specific properties for octoling
+    if (type === 'octoling') {
+        // Additional movement properties for octoling
+        Object.assign(enemy, {
+            velocityY: 0,
+            isJumping: false,
+            movingRight: Math.random() > 0.5, // Random initial movement direction
+            movementStartX: spawnPosition.x, // Starting position for patrol
+            lastJumpTime: Date.now() - Math.random() * 2000, // Stagger jumps
+            currentPlatformId: spawnPosition.platformId, // Current platform
+            targetPlatformId: null, // Target platform when jumping
+            isPatrolling: true, // Patrolling or chasing player
+            stateChangeTime: Date.now() + 5000 + Math.random() * 3000 // Time to next AI state change
+        });
+    }
+    
+    // Add enemy to the game
+    gameState.enemies.push(enemy);
+}
+
 // Check if a position would overlap with existing enemies
-function isPositionOverlapping(position, occupiedPositions) {
+function isPositionOverlapping(position, occupiedPositions, width, height) {
     const buffer = 20; // Extra space around enemies to ensure they're not too close
     
     for (const occupied of occupiedPositions) {
         // Check for overlap using rectangle collision detection with buffer
         if (position.x < occupied.x + occupied.width + buffer &&
-            position.x + enemyTypes.octoSlob.width + buffer > occupied.x &&
+            position.x + width + buffer > occupied.x &&
             position.y < occupied.y + occupied.height + buffer &&
-            position.y + enemyTypes.octoSlob.height + buffer > occupied.y) {
+            position.y + height + buffer > occupied.y) {
             return true; // Overlap detected
         }
     }
@@ -594,6 +646,12 @@ function update() {
     
     // Update enemies
     updateEnemies();
+    
+    // Update health pickups
+    updateHealthPickups();
+    
+    // Update armor pickups
+    updateArmorPickups();
     
     // Update damage numbers
     updateDamageNumbers();
@@ -1058,28 +1116,49 @@ function applyDamageToPlayer(amount) {
     // Store the damage for floating number
     player.damageTaken = amount;
     
-    // Create floating damage number above player
-    createDamageNumber(
-        player.x + player.width / 2,
-        player.y - 20,
-        amount,
-        true // Flag as player damage
-    );
-    
-    // Decrease health (ensure it doesn't go below 0)
-    player.health = Math.max(0, player.health - amount);
-    
-    // Check if health depleted
-    if (player.health <= 0) {
-        player.lives--;
+    // Check if player has temporary armor
+    if (player.temporaryArmor > 0) {
+        // Calculate how much damage is absorbed by armor
+        const armorDamage = Math.min(player.temporaryArmor, amount);
         
-        // Game over if no lives left
-        if (player.lives <= 0) {
-            // Handle game over
-            showGameOver();
-        } else {
-            // Reset health for next life
-            player.health = player.maxHealth;
+        // Reduce armor and remaining damage
+        player.temporaryArmor -= armorDamage;
+        amount -= armorDamage;
+        
+        // Create armor damage number
+        createArmorNumber(
+            player.x + player.width / 2 - 15,
+            player.y - 20,
+            -armorDamage
+        );
+    }
+    
+    // Only show health damage number if there's damage left after armor
+    if (amount > 0) {
+        // Create floating damage number above player
+        createDamageNumber(
+            player.x + player.width / 2 + 15,
+            player.y - 20,
+            amount,
+            true // Flag as player damage
+        );
+        
+        // Decrease health (ensure it doesn't go below 0)
+        player.health = Math.max(0, player.health - amount);
+        
+        // Check if health depleted
+        if (player.health <= 0) {
+            player.lives--;
+            
+            // Game over if no lives left
+            if (player.lives <= 0) {
+                // Handle game over
+                showGameOver();
+            } else {
+                // Reset health for next life
+                player.health = player.maxHealth;
+                player.temporaryArmor = 0; // Reset armor on death
+            }
         }
     }
     
@@ -1145,6 +1224,15 @@ function updateEnemies() {
         
         // Remove enemy if health is zero
         if (enemy.health <= 0) {
+            // Octoling enemies have a 50% chance to drop armor
+            if (enemy.type === 'octoling' && Math.random() < 0.5) {
+                spawnArmorPickup(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+            }
+            // Regular health pickup (50% chance for all enemies)
+            else if (Math.random() < 0.5) {
+                spawnHealthPickup(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+            }
+            
             gameState.enemies.splice(i, 1);
             continue;
         }
@@ -1161,66 +1249,294 @@ function updateEnemies() {
             enemy.animationFrame = (enemy.animationFrame + 1) % 4;
         }
         
-        // Update tentacle phase
-        enemy.tentaclePhase += 0.05;
-        if (enemy.tentaclePhase > Math.PI * 2) {
-            enemy.tentaclePhase -= Math.PI * 2;
-        }
-        
-        // Enemy AI and shooting for octoslobs
+        // Type-specific updates
         if (enemy.type === 'octoSlob') {
-            // Determine if player is in range
-            const distanceToPlayer = Math.abs(enemy.x - gameState.player.x);
-            const inRange = distanceToPlayer < enemyTypes.octoSlob.detectionRange;
-            
-            // Update facing direction
-            enemy.facingRight = gameState.player.x > enemy.x;
-            
-            // Shoot if in range and cooldown has passed
-            if (inRange && currentTime - enemy.lastShotTime > enemyTypes.octoSlob.shootCooldown) {
-                enemyShootInk(enemy);
-                enemy.lastShotTime = currentTime;
+            // Update tentacle phase
+            enemy.tentaclePhase += 0.05;
+            if (enemy.tentaclePhase > Math.PI * 2) {
+                enemy.tentaclePhase -= Math.PI * 2;
             }
+            
+            // Basic AI and shooting for octoslobs
+            updateOctoSlobAI(enemy, currentTime);
+        } 
+        else if (enemy.type === 'octoling') {
+            // Advanced movement and shooting for octolings
+            updateOctolingAI(enemy, currentTime);
         }
     }
 }
 
-// Function for enemies to shoot ink
-function enemyShootInk(enemy) {
-    // Calculate direction to player (actual angle, not just left/right)
-    const playerCenterX = gameState.player.x + gameState.player.width / 2;
-    const playerCenterY = gameState.player.y + gameState.player.height / 2;
-    const enemyCenterX = enemy.x + enemy.width / 2;
-    const enemyCenterY = enemy.y + enemy.height / 2;
+// Basic AI for OctoSlob
+function updateOctoSlobAI(enemy, currentTime) {
+    // Determine if player is in range
+    const distanceToPlayer = Math.abs(enemy.x - gameState.player.x);
+    const inRange = distanceToPlayer < enemyTypes.octoSlob.detectionRange;
     
-    // Calculate angle between enemy and player
-    const dx = playerCenterX - enemyCenterX;
-    const dy = playerCenterY - enemyCenterY;
-    const angle = Math.atan2(dy, dx);
+    // Update facing direction
+    enemy.facingRight = gameState.player.x > enemy.x;
     
-    // Calculate velocity components based on angle
-    const speed = enemyTypes.octoSlob.projectileSpeed;
-    const velocityX = Math.cos(angle) * speed;
-    const velocityY = Math.sin(angle) * speed;
+    // Shoot if in range and cooldown has passed
+    if (inRange && currentTime - enemy.lastShotTime > enemyTypes.octoSlob.shootCooldown) {
+        enemyShootInk(enemy);
+        enemy.lastShotTime = currentTime;
+    }
+}
+
+// Advanced AI for Octoling
+function updateOctolingAI(enemy, currentTime) {
+    const player = gameState.player;
+    const distanceToPlayer = Math.abs(enemy.x - player.x);
+    const distanceY = Math.abs(enemy.y - player.y);
+    const inRange = distanceToPlayer < enemyTypes.octoling.detectionRange && distanceY < 200;
     
-    // Update enemy facing direction based on player position
-    enemy.facingRight = dx > 0;
+    // Gravity
+    enemy.velocityY += gameState.gravity * 0.8;
+    enemy.y += enemy.velocityY;
     
-    // Create enemy ink projectile with directional velocity
+    // Ground collision
+    if (enemy.y + enemy.height > gameState.ground.y) {
+        enemy.y = gameState.ground.y - enemy.height;
+        enemy.velocityY = 0;
+        enemy.isJumping = false;
+    }
+    
+    // Platform collision
+    checkEnemyPlatformCollisions(enemy);
+    
+    // AI state management - switch between patrolling and chasing
+    if (currentTime > enemy.stateChangeTime) {
+        // 70% chance to chase if player is in range, otherwise patrol
+        if (inRange && Math.random() < 0.7) {
+            enemy.isPatrolling = false;
+        } else {
+            enemy.isPatrolling = true;
+        }
+        
+        // Set next state change time
+        enemy.stateChangeTime = currentTime + 3000 + Math.random() * 2000;
+    }
+    
+    // If player is in range, always face them
+    if (inRange) {
+        enemy.facingRight = player.x > enemy.x;
+    }
+    
+    // Patrolling behavior
+    if (enemy.isPatrolling) {
+        // Move back and forth in patrol range
+        if (enemy.movingRight) {
+            enemy.x += enemyTypes.octoling.movementSpeed;
+            enemy.facingRight = true;
+            
+            // Turn around if reached patrol limit
+            if (enemy.x > enemy.movementStartX + enemyTypes.octoling.movementRange) {
+                enemy.movingRight = false;
+            }
+        } else {
+            enemy.x -= enemyTypes.octoling.movementSpeed;
+            enemy.facingRight = false;
+            
+            // Turn around if reached patrol limit
+            if (enemy.x < enemy.movementStartX - enemyTypes.octoling.movementRange) {
+                enemy.movingRight = true;
+            }
+        }
+        
+        // Platform awareness - don't walk off edges if on platform
+        if (enemy.onPlatform) {
+            const platformEdgeCheck = 20; // Check distance from edges
+            let onCurrentPlatform = false;
+            
+            for (const platform of gameState.platforms) {
+                // Check if enemy is on this platform
+                if (enemy.y + enemy.height === platform.y && 
+                    enemy.x + enemy.width > platform.x && 
+                    enemy.x < platform.x + platform.width) {
+                    
+                    // Get close to edge but don't fall off
+                    if (enemy.movingRight && enemy.x + enemy.width + platformEdgeCheck > platform.x + platform.width) {
+                        enemy.movingRight = false;
+                    } else if (!enemy.movingRight && enemy.x - platformEdgeCheck < platform.x) {
+                        enemy.movingRight = true;
+                    }
+                    
+                    onCurrentPlatform = true;
+                    break;
+                }
+            }
+            
+            // Update platform status if fallen off
+            if (!onCurrentPlatform && !enemy.isJumping) {
+                enemy.onPlatform = false;
+            }
+        }
+        
+        // Random jumping while patrolling
+        if (!enemy.isJumping && 
+            currentTime - enemy.lastJumpTime > enemyTypes.octoling.jumpCooldown && 
+            Math.random() < 0.01) { // 1% chance each frame
+            
+            enemy.velocityY = -enemyTypes.octoling.jumpForce;
+            enemy.isJumping = true;
+            enemy.lastJumpTime = currentTime;
+        }
+    } 
+    // Chase player behavior
+    else {
+        // Move toward player
+        if (player.x > enemy.x + 50) {
+            enemy.x += enemyTypes.octoling.movementSpeed * 1.2; // Faster when chasing
+            enemy.facingRight = true;
+        } else if (player.x < enemy.x - 50) {
+            enemy.x -= enemyTypes.octoling.movementSpeed * 1.2;
+            enemy.facingRight = false;
+        }
+        
+        // Jump if player is higher and we can jump
+        if (!enemy.isJumping && 
+            player.y < enemy.y - 50 && 
+            currentTime - enemy.lastJumpTime > enemyTypes.octoling.jumpCooldown) {
+            
+            enemy.velocityY = -enemyTypes.octoling.jumpForce * 1.2; // Higher jumps when chasing
+            enemy.isJumping = true;
+            enemy.lastJumpTime = currentTime;
+        }
+        
+        // Jump to platform if player is on different platform
+        if (!enemy.isJumping && enemy.onPlatform && 
+            Math.abs(player.y - enemy.y) > 50 && 
+            currentTime - enemy.lastJumpTime > enemyTypes.octoling.jumpCooldown / 2) { // Faster jumping when chasing platforms
+            
+            enemy.velocityY = -enemyTypes.octoling.jumpForce * 1.1;
+            enemy.isJumping = true;
+            enemy.lastJumpTime = currentTime;
+        }
+    }
+    
+    // Shoot at player if in range with proper cooldown
+    if (inRange && currentTime - enemy.lastShotTime > enemyTypes.octoling.shootCooldown) {
+        // Octolings shoot like hero1 (straight)
+        octolingShoot(enemy);
+        enemy.lastShotTime = currentTime;
+    }
+    
+    // Boundary checks
+    if (enemy.x < gameState.worldBoundaries.left) {
+        enemy.x = gameState.worldBoundaries.left;
+        enemy.movingRight = true;
+    } else if (enemy.x + enemy.width > gameState.worldBoundaries.right) {
+        enemy.x = gameState.worldBoundaries.right - enemy.width;
+        enemy.movingRight = false;
+    }
+}
+
+// Check enemy platform collisions
+function checkEnemyPlatformCollisions(enemy) {
+    // Only check if enemy is falling
+    if (enemy.velocityY <= 0) {
+        return;
+    }
+    
+    // Get enemy bottom edge
+    const enemyBottom = enemy.y + enemy.height;
+    const enemyLeft = enemy.x;
+    const enemyRight = enemy.x + enemy.width;
+    
+    // Check each platform
+    for (const platform of gameState.platforms) {
+        // Check if enemy's bottom edge is at or slightly above the platform's top edge
+        const wasAbovePlatform = enemyBottom - enemy.velocityY <= platform.y;
+        
+        // Check if enemy is now colliding with platform
+        if (wasAbovePlatform &&
+            enemyBottom >= platform.y &&
+            enemyBottom <= platform.y + platform.height/2 &&
+            enemyRight > platform.x &&
+            enemyLeft < platform.x + platform.width) {
+            
+            // Place enemy on top of platform
+            enemy.y = platform.y - enemy.height;
+            enemy.velocityY = 0;
+            enemy.isJumping = false;
+            enemy.onPlatform = true;
+            enemy.currentPlatformId = gameState.platforms.indexOf(platform);
+            
+            // Update patrol range to this platform
+            enemy.movementStartX = Math.max(platform.x + enemy.width, 
+                                          Math.min(platform.x + platform.width - enemy.width, 
+                                                  enemy.x));
+            break;
+        }
+    }
+}
+
+// Octoling shooting function (similar to hero1 shooting)
+function octolingShoot(enemy) {
+    const direction = enemy.facingRight ? 1 : -1;
+    const offsetX = enemy.facingRight ? enemy.width : 0;
+    
+    // Create projectile
     gameState.projectiles.push({
-        x: enemyCenterX,
-        y: enemyCenterY,
-        width: enemyTypes.octoSlob.projectileSize,
-        height: enemyTypes.octoSlob.projectileSize,
-        speedX: velocityX,
-        speedY: velocityY,
-        angle: angle, // Store the angle for reference
-        color: '#FF4500', // Orange-red ink color for enemies
-        damage: enemyTypes.octoSlob.projectileDamage, // Use the value from enemyTypes
+        x: enemy.x + offsetX,
+        y: enemy.y + enemy.height / 2,
+        width: enemyTypes.octoling.projectileSize,
+        height: enemyTypes.octoling.projectileSize,
+        speed: enemyTypes.octoling.projectileSpeed * direction,
+        color: '#9932CC', // Purple ink color
+        damage: enemyTypes.octoling.projectileDamage,
         canDamage: true,
-        isEnemyProjectile: true, // Flag to identify enemy projectiles
-        gravity: 0.05 // Add slight gravity for more natural arc
+        isEnemyProjectile: true
     });
+}
+
+// Draw background elements like clouds and mountains
+function drawBackground() {
+    // Draw clouds (example)
+    ctx.fillStyle = 'white';
+    ctx.fillRect(100 - gameState.camera.x * 0.2, 100, 60, 30);
+    ctx.fillRect(300 - gameState.camera.x * 0.2, 80, 80, 40);
+    ctx.fillRect(600 - gameState.camera.x * 0.2, 120, 70, 35);
+    
+    // More clouds at different distances (parallax effect)
+    ctx.fillRect(900 - gameState.camera.x * 0.15, 150, 90, 40);
+    ctx.fillRect(1200 - gameState.camera.x * 0.15, 90, 70, 30);
+    ctx.fillRect(-200 - gameState.camera.x * 0.15, 120, 80, 35);
+    
+    // Draw mountains (parallax background)
+    ctx.fillStyle = '#6b8e23';
+    ctx.beginPath();
+    ctx.moveTo(0 - gameState.camera.x * 0.5, gameState.ground.y);
+    ctx.lineTo(200 - gameState.camera.x * 0.5, 300);
+    ctx.lineTo(400 - gameState.camera.x * 0.5, gameState.ground.y);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.moveTo(350 - gameState.camera.x * 0.5, gameState.ground.y);
+    ctx.lineTo(550 - gameState.camera.x * 0.5, 250);
+    ctx.lineTo(750 - gameState.camera.x * 0.5, gameState.ground.y);
+    ctx.fill();
+    
+    // Add more mountains
+    ctx.beginPath();
+    ctx.moveTo(700 - gameState.camera.x * 0.5, gameState.ground.y);
+    ctx.lineTo(950 - gameState.camera.x * 0.5, 280);
+    ctx.lineTo(1200 - gameState.camera.x * 0.5, gameState.ground.y);
+    ctx.fill();
+    
+    // Add some distant mountains (slower parallax)
+    ctx.fillStyle = '#556b2f';
+    ctx.beginPath();
+    ctx.moveTo(-300 - gameState.camera.x * 0.3, gameState.ground.y);
+    ctx.lineTo(-100 - gameState.camera.x * 0.3, 350);
+    ctx.lineTo(100 - gameState.camera.x * 0.3, gameState.ground.y);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.moveTo(1000 - gameState.camera.x * 0.3, gameState.ground.y);
+    ctx.lineTo(1300 - gameState.camera.x * 0.3, 320);
+    ctx.lineTo(1600 - gameState.camera.x * 0.3, gameState.ground.y);
+    ctx.fill();
 }
 
 function draw() {
@@ -1238,10 +1554,16 @@ function draw() {
     );
     
     // Draw some background elements (clouds, mountains, etc.)
-    drawBackgroundElements();
+    drawBackground();
     
     // Draw platforms
     drawPlatforms();
+    
+    // Draw health pickups
+    drawHealthPickups();
+    
+    // Draw armor pickups
+    drawArmorPickups();
     
     // Draw enemies
     drawEnemies();
@@ -1251,60 +1573,6 @@ function draw() {
     
     // Draw damage numbers (after projectiles but before UI elements)
     drawDamageNumbers();
-    
-    // Draw charge meter if charging
-    if (gameState.player.isCharging || gameState.player.isBarraging) {
-        drawChargeMeter();
-    }
-    
-    // Draw contact damage effect if active for hero2
-    if (gameState.player.hasContactDamage) {
-        drawContactDamageEffect();
-    }
-    
-    // Draw player
-    if (gameState.player.sprite) {
-        // Save the current context state
-        ctx.save();
-        
-        // Position of player accounting for camera
-        const drawX = gameState.player.x - gameState.camera.x;
-        
-        // Set up for flipping if needed
-        if (!gameState.player.facingRight) {
-            // Flip horizontally
-            ctx.translate(drawX + gameState.player.width, gameState.player.y);
-            ctx.scale(-1, 1);
-            ctx.drawImage(
-                gameState.player.sprite,
-                0,
-                0,
-                gameState.player.width,
-                gameState.player.height
-            );
-        } else {
-            // Normal drawing (facing right)
-            ctx.drawImage(
-                gameState.player.sprite,
-                drawX,
-                gameState.player.y,
-                gameState.player.width,
-                gameState.player.height
-            );
-        }
-        
-        // Restore the context state
-        ctx.restore();
-    } else {
-        // Fallback if sprite isn't loaded
-        ctx.fillStyle = 'purple';
-        ctx.fillRect(
-            gameState.player.x - gameState.camera.x,
-            gameState.player.y,
-            gameState.player.width,
-            gameState.player.height
-        );
-    }
     
     // Draw player health bar and lives
     drawPlayerHealthAndLives();
@@ -1328,44 +1596,375 @@ function draw() {
             canvas.height
         );
     }
+    
+    // Draw player
+    drawPlayer();
+    
+    // Draw charge meter if charging
+    if (gameState.player.isCharging) {
+        drawChargeMeter();
+    }
 }
 
-function drawBackgroundElements() {
-    // Draw clouds (example)
-    ctx.fillStyle = 'white';
-    ctx.fillRect(100 - gameState.camera.x * 0.2, 100, 60, 30);
-    ctx.fillRect(300 - gameState.camera.x * 0.2, 80, 80, 40);
-    ctx.fillRect(600 - gameState.camera.x * 0.2, 120, 70, 35);
-    
-    // Draw mountains (example)
-    ctx.fillStyle = '#6b8e23';
-    ctx.beginPath();
-    ctx.moveTo(0 - gameState.camera.x * 0.5, gameState.ground.y);
-    ctx.lineTo(200 - gameState.camera.x * 0.5, 300);
-    ctx.lineTo(400 - gameState.camera.x * 0.5, gameState.ground.y);
-    ctx.fill();
-    
-    ctx.beginPath();
-    ctx.moveTo(350 - gameState.camera.x * 0.5, gameState.ground.y);
-    ctx.lineTo(550 - gameState.camera.x * 0.5, 250);
-    ctx.lineTo(750 - gameState.camera.x * 0.5, gameState.ground.y);
-    ctx.fill();
+// Spawn a health pickup at the specified position
+function spawnHealthPickup(x, y) {
+    gameState.healthPickups.push({
+        x: x,
+        y: y,
+        width: 25,
+        height: 25,
+        healAmount: 20,
+        velocityY: -4, // Initial upward velocity
+        pulseScale: 0, // For animation effect
+        rotationAngle: 0 // For animation effect
+    });
 }
 
-// Draw enemies
-function drawEnemies() {
-    gameState.enemies.forEach(enemy => {
-        const drawX = enemy.x - gameState.camera.x;
+// Update health pickups
+function updateHealthPickups() {
+    for (let i = gameState.healthPickups.length - 1; i >= 0; i--) {
+        const pickup = gameState.healthPickups[i];
         
-        // Skip rendering if off screen
-        if (drawX < -100 || drawX > canvas.width + 100) {
+        // Apply gravity and update position
+        pickup.velocityY += gameState.gravity * 0.5;
+        pickup.y += pickup.velocityY;
+        
+        // Bounce off the ground
+        if (pickup.y + pickup.height > gameState.ground.y) {
+            pickup.y = gameState.ground.y - pickup.height;
+            pickup.velocityY = -pickup.velocityY * 0.5; // Bounce with reduced velocity
+            
+            // Stop bouncing if velocity is very low
+            if (Math.abs(pickup.velocityY) < 0.5) {
+                pickup.velocityY = 0;
+            }
+        }
+        
+        // Bounce off platforms
+        for (const platform of gameState.platforms) {
+            // Check if pickup is above platform and falling onto it
+            if (pickup.velocityY > 0 && 
+                pickup.y + pickup.height > platform.y && 
+                pickup.y < platform.y && 
+                pickup.x + pickup.width > platform.x && 
+                pickup.x < platform.x + platform.width) {
+                
+                pickup.y = platform.y - pickup.height;
+                pickup.velocityY = -pickup.velocityY * 0.5; // Bounce with reduced velocity
+                
+                // Stop bouncing if velocity is very low
+                if (Math.abs(pickup.velocityY) < 0.5) {
+                    pickup.velocityY = 0;
+                }
+            }
+        }
+        
+        // Update animation properties
+        pickup.pulseScale = Math.sin(Date.now() / 200) * 0.1;
+        pickup.rotationAngle += 0.02;
+        
+        // Check for player collision to collect health
+        const player = gameState.player;
+        if (pickup.x < player.x + player.width &&
+            pickup.x + pickup.width > player.x &&
+            pickup.y < player.y + player.height &&
+            pickup.y + pickup.height > player.y) {
+            
+            // Heal player but don't exceed max health
+            const oldHealth = player.health;
+            player.health = Math.min(player.health + pickup.healAmount, player.maxHealth);
+            
+            // Create healing number if health was gained
+            const healingAmount = player.health - oldHealth;
+            if (healingAmount > 0) {
+                createHealingNumber(
+                    player.x + player.width / 2,
+                    player.y - 20,
+                    healingAmount
+                );
+            }
+            
+            // Remove the pickup
+            gameState.healthPickups.splice(i, 1);
+        }
+    }
+}
+
+// Create a floating healing number (similar to damage number but green)
+function createHealingNumber(x, y, amount) {
+    gameState.damageNumbers.push({
+        x: x,
+        y: y - 20,
+        value: amount,
+        color: '#00FF00', // Green for healing
+        age: 0,
+        lifespan: 40,
+        velocityY: -1.5,
+        velocityX: (Math.random() - 0.5) * 1.5,
+        isHealing: true // Flag as healing number
+    });
+}
+
+// Draw health pickups
+function drawHealthPickups() {
+    gameState.healthPickups.forEach(pickup => {
+        const drawX = pickup.x - gameState.camera.x;
+        
+        // Skip if off screen
+        if (drawX < -50 || drawX > canvas.width + 50) {
             return;
         }
         
-        // Draw octoslob
-        if (enemy.type === 'octoSlob') {
-            drawOctoSlob(enemy, drawX);
+        // Save context for transformations
+        ctx.save();
+        
+        // Position at center of pickup
+        ctx.translate(
+            drawX + pickup.width / 2,
+            pickup.y + pickup.height / 2
+        );
+        
+        // Apply slight rotation and pulsing effect
+        ctx.rotate(pickup.rotationAngle);
+        const scale = 1 + pickup.pulseScale;
+        ctx.scale(scale, scale);
+        
+        // Draw the health box
+        ctx.fillStyle = 'white';
+        ctx.fillRect(
+            -pickup.width / 2,
+            -pickup.height / 2,
+            pickup.width,
+            pickup.height
+        );
+        
+        // Draw red border
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(
+            -pickup.width / 2,
+            -pickup.height / 2,
+            pickup.width,
+            pickup.height
+        );
+        
+        // Draw red plus symbol
+        ctx.fillStyle = 'red';
+        
+        // Horizontal bar of plus
+        ctx.fillRect(
+            -pickup.width / 2 + 5,
+            -3,
+            pickup.width - 10,
+            6
+        );
+        
+        // Vertical bar of plus
+        ctx.fillRect(
+            -3,
+            -pickup.height / 2 + 5,
+            6,
+            pickup.height - 10
+        );
+        
+        // Restore context
+        ctx.restore();
+        
+        // Optional: Add a glowing effect
+        ctx.save();
+        ctx.globalAlpha = 0.3 + Math.sin(Date.now() / 150) * 0.1;
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(
+            drawX + pickup.width / 2,
+            pickup.y + pickup.height / 2,
+            pickup.width * 0.8,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+        ctx.restore();
+    });
+}
+
+// Spawn an armor pickup at the specified position
+function spawnArmorPickup(x, y) {
+    gameState.armorPickups.push({
+        x: x,
+        y: y,
+        width: 30,
+        height: 30,
+        armorAmount: 25,
+        velocityY: -5, // Initial upward velocity (higher than health pickup)
+        pulseScale: 0, // For animation effect
+        rotationAngle: 0, // For animation effect
+        spinSpeed: 0.04 // Spin faster than health pickups
+    });
+}
+
+// Update armor pickups
+function updateArmorPickups() {
+    for (let i = gameState.armorPickups.length - 1; i >= 0; i--) {
+        const pickup = gameState.armorPickups[i];
+        
+        // Apply gravity and update position
+        pickup.velocityY += gameState.gravity * 0.5;
+        pickup.y += pickup.velocityY;
+        
+        // Bounce off the ground
+        if (pickup.y + pickup.height > gameState.ground.y) {
+            pickup.y = gameState.ground.y - pickup.height;
+            pickup.velocityY = -pickup.velocityY * 0.6; // Bounce with reduced velocity
+            
+            // Stop bouncing if velocity is very low
+            if (Math.abs(pickup.velocityY) < 0.5) {
+                pickup.velocityY = 0;
+            }
         }
+        
+        // Bounce off platforms
+        for (const platform of gameState.platforms) {
+            // Check if pickup is above platform and falling onto it
+            if (pickup.velocityY > 0 && 
+                pickup.y + pickup.height > platform.y && 
+                pickup.y < platform.y && 
+                pickup.x + pickup.width > platform.x && 
+                pickup.x < platform.x + platform.width) {
+                
+                pickup.y = platform.y - pickup.height;
+                pickup.velocityY = -pickup.velocityY * 0.6; // Bounce with reduced velocity
+                
+                // Stop bouncing if velocity is very low
+                if (Math.abs(pickup.velocityY) < 0.5) {
+                    pickup.velocityY = 0;
+                }
+            }
+        }
+        
+        // Update animation properties
+        pickup.pulseScale = Math.sin(Date.now() / 150) * 0.15; // Stronger pulse effect
+        pickup.rotationAngle += pickup.spinSpeed;
+        
+        // Check for player collision to collect armor
+        const player = gameState.player;
+        if (pickup.x < player.x + player.width &&
+            pickup.x + pickup.width > player.x &&
+            pickup.y < player.y + player.height &&
+            pickup.y + pickup.height > player.y) {
+            
+            // Add armor to player
+            player.temporaryArmor += pickup.armorAmount;
+            
+            // Create armor number
+            createArmorNumber(
+                player.x + player.width / 2,
+                player.y - 20,
+                pickup.armorAmount
+            );
+            
+            // Remove the pickup
+            gameState.armorPickups.splice(i, 1);
+        }
+    }
+}
+
+// Create a floating armor number (white for armor)
+function createArmorNumber(x, y, amount) {
+    gameState.damageNumbers.push({
+        x: x,
+        y: y - 20,
+        value: amount,
+        color: '#FFFFFF', // White for armor
+        age: 0,
+        lifespan: 40,
+        velocityY: -1.5,
+        velocityX: (Math.random() - 0.5) * 1.5,
+        isArmor: true // Flag as armor number
+    });
+}
+
+// Draw armor pickups
+function drawArmorPickups() {
+    gameState.armorPickups.forEach(pickup => {
+        const drawX = pickup.x - gameState.camera.x;
+        
+        // Skip if off screen
+        if (drawX < -50 || drawX > canvas.width + 50) {
+            return;
+        }
+        
+        // Save context for transformations
+        ctx.save();
+        
+        // Position at center of pickup
+        ctx.translate(
+            drawX + pickup.width / 2,
+            pickup.y + pickup.height / 2
+        );
+        
+        // Apply rotation and pulsing effect
+        ctx.rotate(pickup.rotationAngle);
+        const scale = 1 + pickup.pulseScale;
+        ctx.scale(scale, scale);
+        
+        // Draw the armor plate (shield shape)
+        // Shield background
+        ctx.fillStyle = '#DDDDDD'; // Light gray
+        ctx.beginPath();
+        ctx.moveTo(0, -pickup.height/2); // Top center
+        ctx.bezierCurveTo(
+            pickup.width/2, -pickup.height/2,
+            pickup.width/2, pickup.height/2,
+            0, pickup.height/2
+        );
+        ctx.bezierCurveTo(
+            -pickup.width/2, pickup.height/2,
+            -pickup.width/2, -pickup.height/2,
+            0, -pickup.height/2
+        );
+        ctx.fill();
+        
+        // Shield border
+        ctx.strokeStyle = '#888888';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Draw cross/plus in center
+        ctx.fillStyle = '#FFFFFF'; // White
+        
+        // Horizontal bar of plus
+        ctx.fillRect(
+            -pickup.width / 3,
+            -3,
+            pickup.width * 2/3,
+            6
+        );
+        
+        // Vertical bar of plus
+        ctx.fillRect(
+            -3,
+            -pickup.height / 3,
+            6,
+            pickup.height * 2/3
+        );
+        
+        // Restore context
+        ctx.restore();
+        
+        // Add a glowing effect
+        ctx.save();
+        ctx.globalAlpha = 0.4 + Math.sin(Date.now() / 100) * 0.2;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(
+            drawX + pickup.width / 2,
+            pickup.y + pickup.height / 2,
+            pickup.width * 0.8,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+        ctx.restore();
     });
 }
 
@@ -1374,7 +1973,7 @@ function drawOctoSlob(enemy, drawX) {
     // Save context
     ctx.save();
     
-    // Draw the octoslob image if loaded
+    // Draw the octoSlob image if loaded
     if (enemyImages.octoSlob && enemyImages.octoSlob.complete) {
         // If damaged, draw white overlay
         if (enemy.damaged) {
@@ -1384,31 +1983,23 @@ function drawOctoSlob(enemy, drawX) {
             ctx.globalAlpha = 1.0;
         }
         
-        // Draw with slight pulsating scale
-        const pulseScale = 0.95 + Math.sin(Date.now() / 300) * 0.05;
-        const centerX = drawX + enemy.width/2;
-        const centerY = enemy.y + enemy.height/2;
-        const scaledWidth = enemy.width * pulseScale;
-        const scaledHeight = enemy.height * pulseScale;
-        
         // Position for drawing
-        let drawPosX = centerX - scaledWidth/2;
+        let drawPosX = drawX;
         
         // Flip image if facing left
         if (!enemy.facingRight) {
             ctx.save();
-            ctx.translate(centerX * 2, 0);
+            ctx.translate(drawX + enemy.width, 0);
             ctx.scale(-1, 1);
-            drawPosX = centerX - scaledWidth/2;
+            drawPosX = 0;
         }
         
-        // Draw from center point with pulsing scale
         ctx.drawImage(
             enemyImages.octoSlob,
             drawPosX, 
-            centerY - scaledHeight/2,
-            scaledWidth,
-            scaledHeight
+            enemy.y,
+            enemy.width,
+            enemy.height
         );
         
         // Restore if flipped
@@ -1416,17 +2007,18 @@ function drawOctoSlob(enemy, drawX) {
             ctx.restore();
         }
     } else {
-        // Fallback to the original drawing method if image fails to load
-        // Base color (flash white if damaged)
-        const baseColor = enemy.damaged ? '#FFFFFF' : enemy.color;
+        // Fallback to drawing a custom octoSlob
+        const bodyColor = enemy.damaged ? '#FFFFFF' : enemy.color;
         
-        // Draw simple octoslob placeholder
-        ctx.fillStyle = baseColor;
+        // Draw oval body
+        ctx.fillStyle = bodyColor;
         ctx.beginPath();
-        ctx.arc(
+        ctx.ellipse(
             drawX + enemy.width/2,
             enemy.y + enemy.height/2,
             enemy.width/2,
+            enemy.height/2,
+            0,
             0,
             Math.PI * 2
         );
@@ -1450,6 +2042,53 @@ function drawOctoSlob(enemy, drawX) {
             Math.PI * 2
         );
         ctx.fill();
+        
+        // Draw pupils
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(
+            drawX + enemy.width/3 + (enemy.facingRight ? 2 : -2),
+            enemy.y + enemy.height/3,
+            enemy.width/16,
+            0,
+            Math.PI * 2
+        );
+        ctx.arc(
+            drawX + enemy.width*2/3 + (enemy.facingRight ? 2 : -2),
+            enemy.y + enemy.height/3,
+            enemy.width/16,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+        
+        // Draw tentacles
+        ctx.strokeStyle = bodyColor;
+        ctx.lineWidth = 3;
+        
+        // Draw 8 tentacles
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2 + enemy.tentaclePhase;
+            const tentacleLength = enemy.width * 0.4;
+            
+            ctx.beginPath();
+            ctx.moveTo(
+                drawX + enemy.width/2,
+                enemy.y + enemy.height/2 + enemy.height/4
+            );
+            
+            // Create a wavy tentacle with bezier curve
+            ctx.bezierCurveTo(
+                drawX + enemy.width/2 + Math.cos(angle) * tentacleLength * 0.5,
+                enemy.y + enemy.height/2 + enemy.height/4 + Math.sin(angle) * tentacleLength * 0.5,
+                drawX + enemy.width/2 + Math.cos(angle) * tentacleLength * 0.8,
+                enemy.y + enemy.height/2 + enemy.height/4 + Math.sin(angle) * tentacleLength * 0.8,
+                drawX + enemy.width/2 + Math.cos(angle) * tentacleLength,
+                enemy.y + enemy.height/2 + enemy.height/4 + Math.sin(angle) * tentacleLength
+            );
+            
+            ctx.stroke();
+        }
     }
     
     // Draw shooting cooldown indicator
@@ -1466,7 +2105,7 @@ function drawOctoSlob(enemy, drawX) {
         
         // Fill based on cooldown progress
         const progress = 1 - (cooldownRemaining / enemyTypes.octoSlob.shootCooldown);
-        ctx.fillStyle = 'rgba(255, 120, 0, 0.7)';
+        ctx.fillStyle = 'rgba(255, 69, 0, 0.7)'; // OrangeRed
         ctx.fillRect(cooldownX, cooldownY, cooldownWidth * progress, cooldownHeight);
     }
     
@@ -1814,11 +2453,14 @@ function drawDamageNumbers() {
         ctx.shadowOffsetX = 1;
         ctx.shadowOffsetY = 1;
         
-        // Draw the number
+        // Draw the number with a prefix for healing
         ctx.fillStyle = number.color + Math.floor(opacity * 255).toString(16).padStart(2, '0');
         ctx.font = 'bold 16px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(Math.round(number.value), 0, 0);
+        
+        // Add + prefix for healing numbers
+        const displayText = number.isHealing ? '+' + Math.round(number.value) : Math.round(number.value);
+        ctx.fillText(displayText, 0, 0);
         
         ctx.restore();
     });
@@ -1974,9 +2616,10 @@ function restartGame() {
     gameState.player.contactDamageActive = false;
     gameState.player.invulnerable = false;
     
-    // Clear projectiles and damage numbers
+    // Clear projectiles, damage numbers, and health pickups
     gameState.projectiles = [];
     gameState.damageNumbers = [];
+    gameState.healthPickups = [];
     
     // Generate new enemies
     generateEnemies();
@@ -1996,4 +2639,272 @@ function restartGame() {
 }
 
 // Track if game loop is running
-let gameLoopRunning = false; 
+let gameLoopRunning = false;
+
+// Draw an octoling enemy
+function drawOctoling(enemy, drawX) {
+    // Save context
+    ctx.save();
+    
+    // Draw the octoling image if loaded
+    if (enemyImages.octoling && enemyImages.octoling.complete) {
+        // If damaged, draw white overlay
+        if (enemy.damaged) {
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(drawX, enemy.y, enemy.width, enemy.height);
+            ctx.globalAlpha = 1.0;
+        }
+        
+        // Position for drawing
+        let drawPosX = drawX;
+        
+        // Flip image if facing left
+        if (!enemy.facingRight) {
+            ctx.save();
+            ctx.translate(drawX + enemy.width, 0);
+            ctx.scale(-1, 1);
+            drawPosX = 0;
+        }
+        
+        // Draw with animation based on movement
+        const bounceOffset = enemy.isJumping ? 0 : Math.sin(Date.now() / 200) * 3;
+        
+        ctx.drawImage(
+            enemyImages.octoling,
+            drawPosX, 
+            enemy.y + bounceOffset,
+            enemy.width,
+            enemy.height
+        );
+        
+        // Restore if flipped
+        if (!enemy.facingRight) {
+            ctx.restore();
+        }
+    } else {
+        // Fallback to simple placeholder
+        ctx.fillStyle = enemy.damaged ? '#FFFFFF' : enemy.color;
+        ctx.fillRect(drawX, enemy.y, enemy.width, enemy.height);
+        
+        // Draw eyes
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(
+            drawX + enemy.width/3,
+            enemy.y + enemy.height/3,
+            enemy.width/8,
+            0,
+            Math.PI * 2
+        );
+        ctx.arc(
+            drawX + enemy.width*2/3,
+            enemy.y + enemy.height/3,
+            enemy.width/8,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+        
+        // Draw face direction indicator
+        ctx.fillStyle = 'red';
+        if (enemy.facingRight) {
+            ctx.fillRect(drawX + enemy.width - 10, enemy.y + enemy.height/2 - 3, 10, 6);
+        } else {
+            ctx.fillRect(drawX, enemy.y + enemy.height/2 - 3, 10, 6);
+        }
+    }
+    
+    // Draw shooting cooldown indicator
+    const cooldownRemaining = enemyTypes.octoling.shootCooldown - (Date.now() - enemy.lastShotTime);
+    if (cooldownRemaining > 0 && cooldownRemaining < enemyTypes.octoling.shootCooldown) {
+        const cooldownWidth = enemy.width * 0.8;
+        const cooldownHeight = 3;
+        const cooldownX = drawX + enemy.width/2 - cooldownWidth/2;
+        const cooldownY = enemy.y - 8;
+        
+        // Background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.fillRect(cooldownX, cooldownY, cooldownWidth, cooldownHeight);
+        
+        // Fill based on cooldown progress
+        const progress = 1 - (cooldownRemaining / enemyTypes.octoling.shootCooldown);
+        ctx.fillStyle = 'rgba(153, 50, 204, 0.7)'; // Purple for octoling
+        ctx.fillRect(cooldownX, cooldownY, cooldownWidth * progress, cooldownHeight);
+    }
+    
+    // Draw jump cooldown indicator (only when chasing)
+    if (!enemy.isPatrolling) {
+        const jumpCooldownRemaining = enemyTypes.octoling.jumpCooldown - (Date.now() - enemy.lastJumpTime);
+        if (jumpCooldownRemaining > 0 && jumpCooldownRemaining < enemyTypes.octoling.jumpCooldown) {
+            const cooldownWidth = enemy.width * 0.6;
+            const cooldownHeight = 3;
+            const cooldownX = drawX + enemy.width/2 - cooldownWidth/2;
+            const cooldownY = enemy.y - 12;
+            
+            // Background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.fillRect(cooldownX, cooldownY, cooldownWidth, cooldownHeight);
+            
+            // Fill based on cooldown progress
+            const progress = 1 - (jumpCooldownRemaining / enemyTypes.octoling.jumpCooldown);
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.7)'; // Cyan for jump
+            ctx.fillRect(cooldownX, cooldownY, cooldownWidth * progress, cooldownHeight);
+        }
+    }
+    
+    // Draw health bar
+    const healthBarWidth = enemy.width;
+    const healthBarHeight = 5;
+    
+    // Health bar background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(
+        drawX,
+        enemy.y - 15,
+        healthBarWidth,
+        healthBarHeight
+    );
+    
+    // Health bar fill
+    ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+    ctx.fillRect(
+        drawX,
+        enemy.y - 15,
+        (enemy.health / enemyTypes.octoling.health) * healthBarWidth,
+        healthBarHeight
+    );
+    
+    // Restore context
+    ctx.restore();
+}
+
+// Draw enemies
+function drawEnemies() {
+    gameState.enemies.forEach(enemy => {
+        const drawX = enemy.x - gameState.camera.x;
+        
+        // Skip rendering if off screen
+        if (drawX < -100 || drawX > canvas.width + 100) {
+            return;
+        }
+        
+        // Draw based on enemy type
+        if (enemy.type === 'octoSlob') {
+            drawOctoSlob(enemy, drawX);
+        } else if (enemy.type === 'octoling') {
+            drawOctoling(enemy, drawX);
+        }
+    });
+}
+
+// Function for enemies to shoot ink
+function enemyShootInk(enemy) {
+    // Calculate direction to player (actual angle, not just left/right)
+    const playerCenterX = gameState.player.x + gameState.player.width / 2;
+    const playerCenterY = gameState.player.y + gameState.player.height / 2;
+    const enemyCenterX = enemy.x + enemy.width / 2;
+    const enemyCenterY = enemy.y + enemy.height / 2;
+    
+    // Calculate angle between enemy and player
+    const dx = playerCenterX - enemyCenterX;
+    const dy = playerCenterY - enemyCenterY;
+    const angle = Math.atan2(dy, dx);
+    
+    // Calculate velocity components based on angle
+    const speed = enemyTypes.octoSlob.projectileSpeed;
+    const velocityX = Math.cos(angle) * speed;
+    const velocityY = Math.sin(angle) * speed;
+    
+    // Update enemy facing direction based on player position
+    enemy.facingRight = dx > 0;
+    
+    // Create enemy ink projectile with directional velocity
+    gameState.projectiles.push({
+        x: enemyCenterX,
+        y: enemyCenterY,
+        width: enemyTypes.octoSlob.projectileSize,
+        height: enemyTypes.octoSlob.projectileSize,
+        speedX: velocityX,
+        speedY: velocityY,
+        angle: angle, // Store the angle for reference
+        color: '#FF4500', // Orange-red ink color for enemies
+        damage: enemyTypes.octoSlob.projectileDamage, // Use the value from enemyTypes
+        canDamage: true,
+        isEnemyProjectile: true, // Flag to identify enemy projectiles
+        gravity: 0.05 // Add slight gravity for more natural arc
+    });
+}
+
+// Function to draw the player
+function drawPlayer() {
+    // Draw player
+    if (gameState.player.sprite) {
+        // Save the current context state
+        ctx.save();
+        
+        // Position of player accounting for camera
+        const drawX = gameState.player.x - gameState.camera.x;
+        
+        // Set up for flipping if needed
+        if (!gameState.player.facingRight) {
+            // Flip horizontally
+            ctx.translate(drawX + gameState.player.width, gameState.player.y);
+            ctx.scale(-1, 1);
+            ctx.drawImage(
+                gameState.player.sprite,
+                0,
+                0,
+                gameState.player.width,
+                gameState.player.height
+            );
+        } else {
+            // Normal drawing (facing right)
+            ctx.drawImage(
+                gameState.player.sprite,
+                drawX,
+                gameState.player.y,
+                gameState.player.width,
+                gameState.player.height
+            );
+        }
+        
+        // Restore the context state
+        ctx.restore();
+    } else {
+        // Fallback if sprite isn't loaded
+        ctx.fillStyle = 'purple';
+        ctx.fillRect(
+            gameState.player.x - gameState.camera.x,
+            gameState.player.y,
+            gameState.player.width,
+            gameState.player.height
+        );
+    }
+    
+    // Draw contact damage effect if active for hero2
+    if (gameState.player.hasContactDamage && gameState.player.contactDamageActive) {
+        drawContactDamageEffect();
+    }
+    
+    // Player invulnerability visual effect
+    if (gameState.player.invulnerable) {
+        const drawX = gameState.player.x - gameState.camera.x;
+        
+        // Draw translucent shield effect
+        ctx.save();
+        ctx.globalAlpha = 0.3 + Math.sin(Date.now() / 100) * 0.2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(
+            drawX + gameState.player.width/2,
+            gameState.player.y + gameState.player.height/2,
+            gameState.player.width/2 + 5,
+            0,
+            Math.PI * 2
+        );
+        ctx.stroke();
+        ctx.restore();
+    }
+} 
